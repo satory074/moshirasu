@@ -38,7 +38,7 @@ Module map (all in `src/game/`):
 | `state.ts` | `createInitialState`, `addLog`, `nextId`, `addRevenue`, `adjustReputation`. The container, not the rules. `expenses.wages` accrues here-adjacent (in `engine.tick`). |
 | `economy.ts` | Per-半荘 settlement math: ranks seats by **accumulated real 点棒**, then 素点→オカ/ウマ/祝儀→円. 場代 collection, bankroll. Pure. |
 | `customers.ts` | Arrival spawning, stat rolls, wait/rage-quit, post-半荘 leave/stay decision. |
-| `tables.ts` | Table/seat logic + the 局-driven 半荘 engine (`advanceHanchan`/`advanceKyokus`/`resolveKyoku`), 本走/swap/combine, `tickSeatedWaiting`. The biggest rules module. |
+| `tables.ts` | Table/seat logic + the 局-driven 半荘 engine (`advanceHanchan`/`advanceKyokus`/`resolveKyoku`), 本走/swap/combine/rate-change (`canChangeRate`), `tickSeatedWaiting`. The biggest rules module. |
 | `actions.ts` | Player command layer. Each returns `Result`; UI mutates state *only* through here. |
 | `engine.ts` | Turn-based `advance()` (event-driven auto-stop via `detectStop`) + the deterministic per-tick orchestration order in `tick()`. |
 | `selectors.ts` | Read-only derived views for rendering (formatClock, `kpis` incl. `profit`/`wages`, `kyokuLabel`, progress ratios). |
@@ -73,3 +73,4 @@ Module map (all in `src/game/`):
 - **局シミュ定数は `CONFIG.kyoku` に集約**: `kyokuMin`/`ryuukyokuProb`/`tsumoProb`/`winSkillW`/`winLuckW`/`dealerWinMult`/`handValues`/`blueHandMult`/`maxKyokuPerHanchan`/`maxHonba`/`seatedWaitMult`。半荘長・飛び頻度・1日の半荘数（=売上）はここで決まる。`handValues`/`blueHandMult` を上げると点5の飛びが増えるが反動でブレも増える。スコア評価は `scoreRank(利益)`＝`targetProfit` 基準（旧 `targetRevenue` は参考値）。
 - **店員IDは固定域・客/卓IDは1000+**: `createInitialState` の店員は `id:0,1,…`、`hireStaffAction` も `state.staff.length` を連番IDに使う（`nextId` の1000+域と衝突しない）。`staffName(idx)` は4人を超えると `メンバー N` にフォールバック。
 - **卓グリッドは `auto-fill minmax(240px,1fr)`**: `maxTables:12` でも `#tables` のCSSはそのまま流れる（`index.astro` の `<style is:global>`）。`卓 N/12` 表記は `CONFIG.maxTables` 参照で自動追従。
+- **合卓はレート違いでもOK・レート変更も可**: `canCombine` は構造条件（半荘前・客合計1〜4）だけを見て、レート整合は `combineAction` が判定する。両卓の客の希望を両立できるレート（`combineRate`）へ集約し、点5希望と点3希望が混在する場合のみ拒否。`changeRateAction`/`canChangeRate` は「半荘前・客が全員ANY(どちらでも)」の卓のレートを点5⇄点3で切替（混在卓では不可）。どちらも `Customer.pref` を尊重するのが不変条件。

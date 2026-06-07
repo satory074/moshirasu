@@ -5,6 +5,7 @@
 
 import { CONFIG, scoreRank } from "./config";
 import { rateLabel } from "./economy";
+import { canChangeRate } from "./tables";
 import {
   dayProgress,
   formatClock,
@@ -25,6 +26,7 @@ export type Command =
   | { type: "honso"; tableId: number }
   | { type: "swap"; customerId: number; tableId: number }
   | { type: "combine"; a: number; b: number }
+  | { type: "changeRate"; tableId: number }
   | { type: "hireStaff" }
   | { type: "advance" }
   | { type: "restart" };
@@ -119,6 +121,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
           ui.combineFirst = null;
         }
         rerender();
+        break;
+      case "change-rate":
+        fire({ type: "changeRate", tableId: id });
         break;
       case "hire-staff":
         fire({ type: "hireStaff" });
@@ -361,6 +366,11 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       btns.push(
         `<button data-action="combine-pick" data-id="${t.id}" class="mini ${picked ? "mini-on" : ""}">🔗 ${picked ? "合卓:選択中" : "合卓"}</button>`,
       );
+      // 客が全員「どちらでも」ならレート切替を提示。
+      if (canChangeRate(state, t)) {
+        const to = t.rate === "BLUE" ? "🟢 点3へ" : "🔵 点5へ";
+        btns.push(`<button data-action="change-rate" data-id="${t.id}" class="mini">🔁 ${to}</button>`);
+      }
     }
 
     // 「今この卓で何ができるか」を一言で示す（発見性・時間限定アクションの明示）

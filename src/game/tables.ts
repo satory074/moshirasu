@@ -478,19 +478,36 @@ export function attemptSwap(
 }
 
 /**
- * 2卓を合卓できるか。
+ * 2卓を合卓できるか（構造条件のみ）。
  * - 両方とも WAITING_TO_START（半荘前）
- * - 同レート
- * - 合計の「客＋本走」占有が4以下で、本走を外せば客だけで埋まる見込み
- * 実用上は「客の合計が4以下」を条件に、客を1卓へ集約し本走を解放する。
+ * - 客の合計が 1〜4 人
+ * レートは異なっていてもよい。実際にどのレートへ集約するか（客の希望が
+ * 両立するか）は `actions.combineAction` が判定する。
  */
 export function canCombine(a: Table, b: Table): boolean {
   if (a.id === b.id) return false;
   if (a.progress.status !== "WAITING_TO_START") return false;
   if (b.progress.status !== "WAITING_TO_START") return false;
-  if (a.rate !== b.rate) return false;
   const totalCustomers = customerCount(a) + customerCount(b);
   return totalCustomers >= 1 && totalCustomers <= 4;
+}
+
+/**
+ * 卓のレートを変更できるか。
+ * - 半荘前（WAITING_TO_START）
+ * - 客が1人以上いて、全員が「どちらでも(ANY)」希望
+ * （点5/点3 を明確に希望する客が1人でもいれば不可）
+ */
+export function canChangeRate(state: GameState, table: Table): boolean {
+  if (table.progress.status !== "WAITING_TO_START") return false;
+  let customers = 0;
+  for (const seat of table.seats) {
+    if (seat.occupant.kind !== "CUSTOMER") continue;
+    customers++;
+    const c = state.customers.get(seat.occupant.customerId);
+    if (!c || c.pref !== "ANY") return false;
+  }
+  return customers >= 1;
 }
 
 /**

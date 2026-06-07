@@ -5,12 +5,14 @@ import { settleHanchan } from "../src/game/economy";
 import { createInitialState } from "../src/game/state";
 import { tick } from "../src/game/engine";
 import {
+  changeRateAction,
   combineAction,
   hireStaffAction,
   honsoAction,
   openTableAction,
   seatCustomerAction,
 } from "../src/game/actions";
+import { spawnCustomer } from "../src/game/customers";
 import { firstEmptyIdx } from "../src/game/tables";
 import type { GameState, Rate } from "../src/game/types";
 
@@ -202,5 +204,55 @@ if (hanchan <= 0) throw new Error("no hanchan played");
 // ---- 5) 卓数上限が12 ----
 if (CONFIG.maxTables !== 12) throw new Error(`maxTables expected 12, got ${CONFIG.maxTables}`);
 console.log(`[tables] maxTables=${CONFIG.maxTables}`);
+
+// ---- 6) レート違いの合卓: 希望が両立すれば集約できる ----
+{
+  const state = createInitialState(99);
+  const c1 = spawnCustomer(state);
+  c1.pref = "ANY"; // どちらでも
+  const c2 = spawnCustomer(state);
+  c2.pref = "BLUE"; // 点5希望
+  if (!openTableAction(state, "GREEN", [c1.id]).ok) throw new Error("open green failed");
+  if (!openTableAction(state, "BLUE", [c2.id]).ok) throw new Error("open blue failed");
+  const [ta, tb] = state.tables;
+  const cr = combineAction(state, ta.id, tb.id);
+  if (!cr.ok) throw new Error(`cross-rate combine failed: ${(cr as { reason: string }).reason}`);
+  if (state.tables.length !== 1) throw new Error("combine should leave 1 table");
+  const merged = state.tables[0];
+  if (merged.rate !== "BLUE") throw new Error(`merged rate should be BLUE, got ${merged.rate}`);
+  const custs = merged.seats.filter((s) => s.occupant.kind === "CUSTOMER").length;
+  if (custs !== 2) throw new Error(`merged should have 2 customers, got ${custs}`);
+  console.log(`[combine] 点3(どちらでも)＋点5希望 → 点5卓に合卓 OK（客${custs}人）`);
+
+  // 希望が衝突する場合は不可（点5希望 vs 点3希望）
+  const s2 = createInitialState(98);
+  const g = spawnCustomer(s2);
+  g.pref = "GREEN";
+  const b = spawnCustomer(s2);
+  b.pref = "BLUE";
+  openTableAction(s2, "GREEN", [g.id]);
+  openTableAction(s2, "BLUE", [b.id]);
+  const bad = combineAction(s2, s2.tables[0].id, s2.tables[1].id);
+  if (bad.ok) throw new Error("conflicting-pref combine should fail");
+  console.log("[combine] 点3希望＋点5希望 → 正しく合卓拒否");
+}
+
+// ---- 7) レート変更: 客が全員「どちらでも」なら切替可、混在は不可 ----
+{
+  const state = createInitialState(55);
+  const c = spawnCustomer(state);
+  c.pref = "ANY";
+  openTableAction(state, "GREEN", [c.id]);
+  const t = state.tables[0];
+  const before = t.rate;
+  if (!changeRateAction(state, t.id).ok) throw new Error("changeRate failed");
+  if (t.rate === before) throw new Error("rate did not change");
+  console.log(`[rate] 全員どちらでも → レート ${before}→${t.rate} に変更 OK`);
+  const c2 = spawnCustomer(state);
+  c2.pref = "BLUE"; // 卓は now BLUE なので着席可
+  seatCustomerAction(state, c2.id, t.id);
+  if (changeRateAction(state, t.id).ok) throw new Error("changeRate should fail with non-ANY customer");
+  console.log("[rate] 点5希望が混在 → レート変更を正しく拒否");
+}
 
 console.log("\n✅ smoke test passed");

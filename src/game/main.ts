@@ -1,6 +1,7 @@
 // ===== 合成ルート: state → renderer → engine を配線 =====
 
 import {
+  changeRateAction,
   combineAction,
   hireStaffAction,
   honsoAction,
@@ -42,6 +43,8 @@ export function boot(): void {
         return toRes(swapAction(state, cmd.customerId, cmd.tableId));
       case "combine":
         return toRes(combineAction(state, cmd.a, cmd.b));
+      case "changeRate":
+        return toRes(changeRateAction(state, cmd.tableId));
       case "hireStaff":
         return toRes(hireStaffAction(state));
       case "advance":

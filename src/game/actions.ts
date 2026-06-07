@@ -5,6 +5,7 @@ import { staffName } from "./names";
 import { addLog, adjustReputation } from "./state";
 import {
   attemptSwap,
+  canChangeRate,
   canCombine,
   combineTables,
   customerCount,
@@ -16,7 +17,7 @@ import {
   seatInto,
   tableNo,
 } from "./tables";
-import type { Customer, GameState, Occupant, Rate, Result } from "./types";
+import type { Customer, GameState, Occupant, Rate, Result, Table } from "./types";
 
 /** 待ち客IDから客を引く。 */
 function getWaiting(state: GameState, id: number): Customer | undefined {
@@ -146,25 +147,59 @@ export function swapAction(
   return { ok: false, reason: `${c.name} は点棒・親状況に納得しませんでした` };
 }
 
-/** 合卓: 2卓の客を1卓に集約し本走店員を解放する。 */
+/** 合卓: 2卓の客を1卓に集約し本走店員を解放する。レートは客の希望が両立する側へ寄せる。 */
 export function combineAction(state: GameState, tableIdA: number, tableIdB: number): Result {
   const a = state.tables.find((t) => t.id === tableIdA);
   const b = state.tables.find((t) => t.id === tableIdB);
   if (!a || !b) return { ok: false, reason: "卓が見つかりません" };
   if (!canCombine(a, b)) {
-    return {
-      ok: false,
-      reason: "合卓不可（同レート・半荘前・客合計4人以下が条件）",
-    };
+    return { ok: false, reason: "合卓不可（半荘前・客合計4人以下が条件）" };
   }
-  // 客が多い方を残す
-  const [keep, drop] = customerCount(a) >= customerCount(b) ? [a, b] : [b, a];
+  // 両卓の客の希望を両立できるレートを決める（できなければ不可）。
+  const custs = [...customersOnTable(state, a), ...customersOnTable(state, b)];
+  const rate = combineRate(custs, a.rate, b.rate);
+  if (!rate) {
+    return { ok: false, reason: "点5希望と点3希望の客が混在しており合卓できません" };
+  }
+  // 採用レートを持つ卓を残す（両方/どちらも該当なら客が多い方を残し、そのレートに変更）。
+  let keep: Table;
+  let drop: Table;
+  if (a.rate === rate && b.rate !== rate) {
+    keep = a;
+    drop = b;
+  } else if (b.rate === rate && a.rate !== rate) {
+    keep = b;
+    drop = a;
+  } else {
+    [keep, drop] = customerCount(a) >= customerCount(b) ? [a, b] : [b, a];
+    keep.rate = rate; // 半荘前なので安全に変更できる
+  }
   const result = combineTables(state, keep, drop);
   const no = tableNo(state, result);
-  addLog(state, "COMBINE", `🔗 卓を合卓して卓#${no} に集約（本走を解放）`);
+  addLog(
+    state,
+    "COMBINE",
+    `🔗 卓を合卓して卓#${no}（${rate === "BLUE" ? "点5" : "点3"}）に集約（本走を解放）`,
+  );
   if (firstEmptyIdx(result) >= 0) {
     addLog(state, "INFO", `卓#${no} はあと${4 - occupiedCount(result)}人。案内/本走で埋めてください`);
   }
+  return { ok: true };
+}
+
+/** レート変更: 客が全員「どちらでも」の半荘前卓のレートを切り替える（点5⇄点3）。 */
+export function changeRateAction(state: GameState, tableId: number): Result {
+  const table = state.tables.find((t) => t.id === tableId);
+  if (!table) return { ok: false, reason: "卓が見つかりません" };
+  if (!canChangeRate(state, table)) {
+    return { ok: false, reason: "レート変更不可（半荘前・客が全員『どちらでも』の卓のみ）" };
+  }
+  table.rate = table.rate === "BLUE" ? "GREEN" : "BLUE";
+  addLog(
+    state,
+    "OPEN",
+    `🔁 卓#${tableNo(state, table)} のレートを ${table.rate === "BLUE" ? "点5(ブルー)" : "点3(グリーン)"} に変更`,
+  );
   return { ok: true };
 }
 
@@ -188,6 +223,32 @@ export function hireStaffAction(state: GameState): Result {
 
 function prefAllows(c: Customer, rate: Rate): boolean {
   return c.pref === "ANY" || c.pref === rate;
+}
+
+/** 卓に着席中の客一覧。 */
+function customersOnTable(state: GameState, table: Table): Customer[] {
+  const out: Customer[] = [];
+  for (const seat of table.seats) {
+    if (seat.occupant.kind !== "CUSTOMER") continue;
+    const c = state.customers.get(seat.occupant.customerId);
+    if (c) out.push(c);
+  }
+  return out;
+}
+
+/**
+ * 合卓後のレートを決める。全客の希望を両立するレートを返す（無ければ null）。
+ * 既存卓が持つレート（ra/rb）を優先し、レート変更を避ける。
+ */
+function combineRate(custs: Customer[], ra: Rate, rb: Rate): Rate | null {
+  const ok = (r: Rate) => custs.every((c) => c.pref === "ANY" || c.pref === r);
+  const blueOk = ok("BLUE");
+  const greenOk = ok("GREEN");
+  for (const r of [ra, rb]) {
+    if (r === "BLUE" && blueOk) return "BLUE";
+    if (r === "GREEN" && greenOk) return "GREEN";
+  }
+  return blueOk ? "BLUE" : greenOk ? "GREEN" : null;
 }
 
 function occupiedCount(table: { seats: { occupant: { kind: string } }[] }): number {
