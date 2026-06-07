@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+/* ===== デザイントークン ===== */
+:root {
+  --felt: #0f3d2e; /* 麻雀卓のフェルト緑 */
+  --felt-dark: #0a2c20;
+  --blue: #2563eb; /* ブルー卓(点5) */
+  --blue-soft: #1e3a8a;
+  --green: #16a34a; /* グリーン卓(点3) */
+  --green-soft: #14532d;
+  --amber: #f59e0b; /* モシラス */
+  --red: #ef4444; /* ラスハン */
+  --ink: #f8fafc;
+  --muted: #94a3b8;
+  --panel: #1e293b;
+  --panel-2: #0f172a;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background:
+    radial-gradient(1200px 800px at 50% -10%, #143b2c 0%, #0a1a14 60%, #060d0a 100%);
+  color: var(--ink);
+  font-family:
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, -apple-system,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* スムーズなバー遷移（半荘進行・我慢ゲージ） */
+.bar-fill {
+  transition: width 0.18s linear;
+}
+
+/* 点滅（緊急の帰宅時刻間近など） */
+@keyframes pulse-warn {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-warn {
+  animation: pulse-warn 0.9s ease-in-out infinite;
+}
+
+/* 新着ログのフェードイン */
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.log-in {
+  animation: log-in 0.25s ease-out;
+}
+
+/* 選択中のハイライト */
+.selected-ring {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* スクロールバー控えめに */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
