@@ -83,11 +83,20 @@ export interface Seat {
 
 /** 半荘進行。 */
 export interface HanchanProgress {
+  /** 現在の場（EAST=東場 / SOUTH=南場）と前後状態。 */
   status: HanchanStatus;
   /** 現在の半荘で経過した分。 */
   elapsedMin: number;
   /** この卓で完了した半荘数。 */
   hanchanCount: number;
+  /** 現在の局番号（その場での 1..4。東1局なら 1）。 */
+  kyoku: number;
+  /** 本場（連荘・流局の積み）。 */
+  honba: number;
+  /** 現在の親席 index（0..3）。 */
+  dealerSeat: number;
+  /** この半荘で解決済みの局数（局境界での点棒移動回数）。 */
+  resolvedKyoku: number;
 }
 
 /** 卓。 */
@@ -130,6 +139,12 @@ export interface Revenue {
   total: number;
 }
 
+/** 経費内訳（利益＝売上−経費）。 */
+export interface Expenses {
+  /** 店員の人件費（時給×人数×営業時間の累計）。 */
+  wages: number;
+}
+
 /** 集計統計。 */
 export interface Stats {
   /** 着席までこぎつけた客数（延べ）。 */
@@ -166,6 +181,8 @@ export interface GameState {
   customers: Map<number, Customer>;
   staff: Staff[];
   revenue: Revenue;
+  /** 経費（人件費など）。利益＝revenue.total−expenses.wages。 */
+  expenses: Expenses;
   /** 評判 0..100。来店率に影響。 */
   reputation: number;
   stats: Stats;

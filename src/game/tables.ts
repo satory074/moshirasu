@@ -42,7 +42,15 @@ export function openTable(
     id: nextId(state),
     rate,
     seats: seats as [Seat, Seat, Seat, Seat],
-    progress: { status: "WAITING_TO_START", elapsedMin: 0, hanchanCount: 0 },
+    progress: {
+      status: "WAITING_TO_START",
+      elapsedMin: 0,
+      hanchanCount: 0,
+      kyoku: 1,
+      honba: 0,
+      dealerSeat: 0,
+      resolvedKyoku: 0,
+    },
     openedAtMin: state.clockMin,
   };
   state.tables.push(table);
@@ -121,39 +129,22 @@ export function rollCalls(state: GameState): (table: Table) => void {
 
 /**
  * 卓の半荘進行を dtMin ぶん進める。
- * WAITING_TO_START → (満席なら) コール→東場 → 南場 → 精算 → 次半荘へ
+ * WAITING_TO_START → (満席なら) 東1局 …（局ごとに点棒移動・親番ローテ）… オーラス → 精算 → 次半荘へ
+ * 飛び（誰かの点棒 < 0）は即精算。連荘で半荘長は可変（CONFIG.kyoku.maxKyokuPerHanchan で上限）。
  */
 export function advanceHanchan(state: GameState, table: Table, dtMin: number): void {
   const p = table.progress;
   switch (p.status) {
     case "WAITING_TO_START": {
       if (isFull(table)) {
-        rollCalls(state)(table);
-        p.status = "EAST";
-        p.elapsedMin = 0;
-        addLog(
-          state,
-          "OPEN",
-          `🀄 卓#${tableNo(state, table)}（${table.rate === "BLUE" ? "点5" : "点3"}）東場開始`,
-        );
+        startHanchan(state, table);
       }
       break;
     }
-    case "EAST": {
-      p.elapsedMin += dtMin;
-      // 半荘中、点棒を少しずつ揺らす（交代受諾判定に効く）。
-      driftPoints(state, table);
-      if (p.elapsedMin >= CONFIG.eastMin) {
-        p.status = "SOUTH";
-      }
-      break;
-    }
+    case "EAST":
     case "SOUTH": {
       p.elapsedMin += dtMin;
-      driftPoints(state, table);
-      if (p.elapsedMin >= CONFIG.eastMin + CONFIG.southMin) {
-        p.status = "SETTLING";
-      }
+      advanceKyokus(state, table);
       break;
     }
     case "SETTLING": {
@@ -164,6 +155,10 @@ export function advanceHanchan(state: GameState, table: Table, dtMin: number): v
       } else {
         p.status = "WAITING_TO_START";
         p.elapsedMin = 0;
+        p.resolvedKyoku = 0;
+        p.kyoku = 1;
+        p.honba = 0;
+        p.dealerSeat = 0;
         p.hanchanCount++;
       }
       break;
@@ -171,6 +166,158 @@ export function advanceHanchan(state: GameState, table: Table, dtMin: number): v
     case "DONE":
       break;
   }
+}
+
+/** 満席の卓で半荘を開始する（東1局へ）。 */
+function startHanchan(state: GameState, table: Table): void {
+  const p = table.progress;
+  rollCalls(state)(table);
+  p.status = "EAST";
+  p.elapsedMin = 0;
+  p.kyoku = 1;
+  p.honba = 0;
+  p.dealerSeat = 0;
+  p.resolvedKyoku = 0;
+  for (const seat of table.seats) {
+    seat.points = CONFIG.oka.mochi; // 25000持ち
+    // 半荘が実際に始まったので、着席客の「開始待ち」をリセット。
+    if (seat.occupant.kind === "CUSTOMER") {
+      const c = state.customers.get(seat.occupant.customerId);
+      if (c) c.waitedMin = 0;
+    }
+  }
+  setDealerFlags(table, 0);
+  addLog(
+    state,
+    "OPEN",
+    `🀄 卓#${tableNo(state, table)}（${table.rate === "BLUE" ? "点5" : "点3"}）東1局開始`,
+  );
+}
+
+/**
+ * 経過分が局境界を越えるたびに1局ぶん解決し、局/場/親を進める。
+ * 飛び or オーラス完了 or 局数上限で精算（SETTLING）へ。
+ */
+function advanceKyokus(state: GameState, table: Table): void {
+  const p = table.progress;
+  const k = CONFIG.kyoku;
+  while (
+    p.resolvedKyoku < k.maxKyokuPerHanchan &&
+    p.elapsedMin >= (p.resolvedKyoku + 1) * k.kyokuMin
+  ) {
+    const res = resolveKyoku(state, table);
+    p.resolvedKyoku++;
+    if (res.busted) {
+      p.status = "SETTLING";
+      return;
+    }
+    const isAllLast = p.status === "SOUTH" && p.kyoku >= 4;
+    if (res.renchan && p.honba < k.maxHonba) {
+      // 連荘（親の和了/聴牌）。オーラスで親がトップなら上がり止め。
+      if (isAllLast && isDealerLeading(table, p.dealerSeat)) {
+        p.status = "SETTLING";
+        return;
+      }
+      p.honba++;
+    } else {
+      // 親流れ。オーラスを親が流れたら半荘終了。
+      if (isAllLast) {
+        p.status = "SETTLING";
+        return;
+      }
+      p.honba = 0;
+      p.dealerSeat = (p.dealerSeat + 1) % 4;
+      p.kyoku++;
+      if (p.status === "EAST" && p.kyoku > 4) {
+        p.status = "SOUTH";
+        p.kyoku = 1;
+      }
+      setDealerFlags(table, p.dealerSeat);
+    }
+  }
+  // 局数上限に達したら（連荘が長引いた等）打ち切って精算。
+  if (p.resolvedKyoku >= k.maxKyokuPerHanchan && p.status !== "SETTLING") {
+    p.status = "SETTLING";
+  }
+}
+
+/**
+ * 1局を解決して点棒を移動する（4席ゼロサム・本走も打つ）。
+ * 流局 or 和了者抽選（強さ・ツキ＋親補正）→ ツモ/ロンで実点棒を移動。
+ * 戻り値: 連荘するか（親の和了/親聴牌流局）と、飛び（点棒<0）が出たか。
+ */
+function resolveKyoku(state: GameState, table: Table): { renchan: boolean; busted: boolean } {
+  const rng = state.rng;
+  const k = CONFIG.kyoku;
+  const dealer = table.progress.dealerSeat;
+
+  // --- 流局 ---
+  if (rng.chance(k.ryuukyokuProb)) {
+    const tenpai = table.seats.map((s) => rng.chance(0.4 + 0.35 * statsOf(state, s).skill));
+    const nT = tenpai.filter(Boolean).length;
+    if (nT > 0 && nT < 4) {
+      // ノーテン罰符をテンパイ者で山分け（整数・ゼロサム）。
+      let pool = 0;
+      const loss = Math.round(k.notenPenalty / (4 - nT));
+      table.seats.forEach((s, i) => {
+        if (!tenpai[i]) {
+          s.points -= loss;
+          pool += loss;
+        }
+      });
+      const each = Math.floor(pool / nT);
+      let rem = pool - each * nT;
+      table.seats.forEach((s, i) => {
+        if (tenpai[i]) {
+          let g = each;
+          if (rem > 0) {
+            g++;
+            rem--;
+          }
+          s.points += g;
+        }
+      });
+    }
+    return { renchan: !!tenpai[dealer], busted: hasMinus(table) };
+  }
+
+  // --- 和了者抽選（強さ・ツキのソフトマックス＋親補正）---
+  const weights = table.seats.map((s, i) => {
+    const { skill, luck } = statsOf(state, s);
+    let w = Math.exp(k.winSkillW * skill + k.winLuckW * luck);
+    if (i === dealer) w *= k.dealerWinMult;
+    return w;
+  });
+  const winner = weightedIndex(rng, weights);
+  const winnerIsDealer = winner === dealer;
+
+  // 手の点数（点）。ヘビーテール。点5卓は手が大きく振れる（飛びのリスク）。
+  let handPts = Math.round(rng.weighted<number>(k.handValues));
+  if (table.rate === "BLUE") handPts = Math.round(handPts * k.blueHandMult);
+  const tsumo = rng.chance(k.tsumoProb);
+
+  if (tsumo) {
+    // ツモ: 全員から徴収（親なら均等、子なら親が多め）。勝者は徴収合計を得る。
+    let collected = 0;
+    table.seats.forEach((s, i) => {
+      if (i === winner) return;
+      let pay: number;
+      if (winnerIsDealer) pay = Math.round(handPts / 3);
+      else pay = i === dealer ? Math.round(handPts / 2) : Math.round(handPts / 4);
+      s.points -= pay;
+      collected += pay;
+    });
+    table.seats[winner].points += collected;
+  } else {
+    // ロン: 放銃者抽選（敗者の中から、低skillほど振り込みやすい）。
+    const losers = [0, 1, 2, 3].filter((i) => i !== winner);
+    const lw = losers.map((i) => Math.exp(-k.winSkillW * statsOf(state, table.seats[i]).skill));
+    const discarder = losers[weightedIndex(rng, lw)];
+    table.seats[discarder].points -= handPts;
+    table.seats[winner].points += handPts;
+  }
+
+  return { renchan: winnerIsDealer, busted: hasMinus(table) };
 }
 
 /** 精算1tick: 場代徴収 + 着順精算 + 去就判定。 */
@@ -284,10 +431,11 @@ export function freeStaff(state: GameState): Staff | undefined {
 }
 
 /**
- * 交代可能か: 東場の間 かつ 本走席がある。
+ * 交代可能か: 「まもなく開始(開始待ち)」または東場の間 かつ 本走席がある。
  */
 export function canSwapHonso(table: Table): boolean {
-  return table.progress.status === "EAST" && hasHonso(table);
+  const st = table.progress.status;
+  return (st === "WAITING_TO_START" || st === "EAST") && hasHonso(table);
 }
 
 /**
@@ -392,14 +540,75 @@ export function tableNo(state: GameState, table: Table): number {
   return state.tables.findIndex((t) => t.id === table.id) + 1;
 }
 
-// ---- 内部 ----
-
-/** 半荘中に各席の点棒を緩く揺らす（交代受諾の見栄えに使う）。 */
-function driftPoints(state: GameState, table: Table): void {
-  for (const seat of table.seats) {
-    if (seat.occupant.kind === "EMPTY") continue;
-    seat.points += Math.round(state.rng.gaussian(0, 1500));
+/**
+ * 開始待ち（WAITING_TO_START・満席前）の卓に着席している客の待ち時間を進める。
+ * 我慢の限界を超えたら席を立って帰る（怒り離席）。満席卓はこのtickで開始されるため対象外。
+ */
+export function tickSeatedWaiting(state: GameState, dtMin: number): void {
+  for (const table of [...state.tables]) {
+    if (table.progress.status !== "WAITING_TO_START") continue;
+    if (isFull(table)) continue; // まもなく開始 → 開始処理に任せる
+    for (let i = 0; i < 4; i++) {
+      const seat = table.seats[i];
+      if (seat.occupant.kind !== "CUSTOMER") continue;
+      const c = state.customers.get(seat.occupant.customerId);
+      if (!c) continue;
+      c.waitedMin += dtMin * CONFIG.kyoku.seatedWaitMult;
+      if (c.waitedMin >= c.patienceMin) {
+        // 開始を待ちきれず席を立つ（怒り離席）。
+        removeFromSeat(state, table, i);
+        c.status = "LEFT";
+        state.stats.rageQuits++;
+        state.stats.totalWaitMin += c.waitedMin;
+        state.stats.waitSamples++;
+        adjustReputation(state, -CONFIG.reputation.rageHit);
+        addLog(
+          state,
+          "RAGE",
+          `💢 ${c.name} が開始を待ちきれず席を立った（待ち${Math.round(c.waitedMin)}分）`,
+        );
+      }
+    }
   }
+}
+
+// ---- 内部（局シミュ）----
+
+/** 座席の打ち手の能力。客は本人の skill/luck、本走の店員は平均的な打ち手。 */
+function statsOf(state: GameState, seat: Seat): { skill: number; luck: number } {
+  if (seat.occupant.kind === "CUSTOMER") {
+    const c = state.customers.get(seat.occupant.customerId);
+    if (c) return { skill: c.skill, luck: c.luck };
+  }
+  return { skill: 0.55, luck: 0.5 };
+}
+
+/** 重み配列から1つ抽選し、その index を返す。 */
+function weightedIndex(rng: GameState["rng"], weights: number[]): number {
+  let total = 0;
+  for (const w of weights) total += w;
+  let r = rng.next() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r < 0) return i;
+  }
+  return weights.length - 1;
+}
+
+/** 各席の親フラグを更新する。 */
+function setDealerFlags(table: Table, dealerSeat: number): void {
+  for (let i = 0; i < 4; i++) table.seats[i].isDealer = i === dealerSeat;
+}
+
+/** 親が現在トップ（最大点棒）か。オーラスの上がり止め判定に使う。 */
+function isDealerLeading(table: Table, dealerSeat: number): boolean {
+  const dp = table.seats[dealerSeat].points;
+  return table.seats.every((s, i) => i === dealerSeat || dp >= s.points);
+}
+
+/** どれかの席が点棒マイナス（飛び）か。 */
+function hasMinus(table: Table): boolean {
+  return table.seats.some((s) => s.points < 0);
 }
 
 function clampLuck(x: number): number {

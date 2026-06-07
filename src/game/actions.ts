@@ -1,6 +1,7 @@
 // ===== プレイヤー命令層（UIはここ経由でしか state を変えない）=====
 
 import { CONFIG } from "./config";
+import { staffName } from "./names";
 import { addLog, adjustReputation } from "./state";
 import {
   attemptSwap,
@@ -26,7 +27,8 @@ function getWaiting(state: GameState, id: number): Customer | undefined {
 function markSeated(state: GameState, c: Customer, tableId: number, seatIdx: number): void {
   c.seatRef = { tableId, seatIdx };
   c.status = "SEATED";
-  c.waitedMin = 0;
+  // waitedMin はリセットしない。半荘が実際に始まる（→東場）まで「開始待ち」として
+  // カウントを継続する（tables.startHanchan で開始時に 0 へ戻す）。
   state.waiting = state.waiting.filter((w) => w.id !== c.id);
   state.stats.served++;
   adjustReputation(state, CONFIG.reputation.serveGain);
@@ -133,7 +135,7 @@ export function swapAction(
   }
   const res = attemptSwap(state, table, c);
   if (!res.ok) {
-    return { ok: false, reason: "今は交代できません（東場の本走席のみ）" };
+    return { ok: false, reason: "今は交代できません（開始待ち/東場の本走席のみ）" };
   }
   const no = tableNo(state, table);
   if (res.accepted) {
@@ -163,6 +165,22 @@ export function combineAction(state: GameState, tableIdA: number, tableIdB: numb
   if (firstEmptyIdx(result) >= 0) {
     addLog(state, "INFO", `卓#${no} はあと${4 - occupiedCount(result)}人。案内/本走で埋めてください`);
   }
+  return { ok: true };
+}
+
+/** 店員を1人雇う。本走の手数は増えるが、人件費（時給）が利益を圧迫する。 */
+export function hireStaffAction(state: GameState): Result {
+  if (state.staff.length >= CONFIG.maxStaff) {
+    return { ok: false, reason: `店員は最大${CONFIG.maxStaff}人までです` };
+  }
+  const id = state.staff.length; // 店員IDは固定域（0,1,2,...）を連番で
+  const name = staffName(id);
+  state.staff.push({ id, name, busy: false });
+  addLog(
+    state,
+    "HONSO",
+    `🧑‍💼 ${name} を雇った（時給¥${CONFIG.wagePerHourYen.toLocaleString()}・現在${state.staff.length}人）`,
+  );
   return { ok: true };
 }
 

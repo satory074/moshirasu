@@ -8,8 +8,35 @@ import { CONFIG } from "./config";
 import { maybeSpawnArrival, tickWaiting } from "./customers";
 import { patienceRatio } from "./selectors";
 import { addLog } from "./state";
-import { advanceHanchan } from "./tables";
-import type { GameState, HanchanStatus } from "./types";
+import { advanceHanchan, tickSeatedWaiting } from "./tables";
+import type { Customer, GameState, HanchanStatus } from "./types";
+
+/** 開始待ち（満席前）の卓に着席し、まだ半荘が始まっていない客の一覧。 */
+function seatedWaiting(state: GameState): Customer[] {
+  const out: Customer[] = [];
+  for (const t of state.tables) {
+    if (t.progress.status !== "WAITING_TO_START") continue;
+    if (t.seats.every((s) => s.occupant.kind !== "EMPTY")) continue; // 満席は開始される
+    for (const s of t.seats) {
+      if (s.occupant.kind !== "CUSTOMER") continue;
+      const c = state.customers.get(s.occupant.customerId);
+      if (c) out.push(c);
+    }
+  }
+  return out;
+}
+
+/** 「まもなく開始（満席・本走あり）」の卓id集合。交代チャンスの停止に使う。 */
+function swapReadyTables(state: GameState): Set<number> {
+  const ids = new Set<number>();
+  for (const t of state.tables) {
+    if (t.progress.status !== "WAITING_TO_START") continue;
+    const full = t.seats.every((s) => s.occupant.kind !== "EMPTY");
+    const honso = t.seats.some((s) => s.occupant.kind === "STAFF");
+    if (full && honso) ids.add(t.id);
+  }
+  return ids;
+}
 
 export interface Engine {
   /** 次の判断イベントまで自動進行する。 */
@@ -22,17 +49,27 @@ interface Snapshot {
   waitingCount: number;
   urgentIds: Set<number>;
   tableStatus: Map<number, HanchanStatus>;
+  swapReady: Set<number>;
 }
 
 /** tick 直前の状態を記録（イベント検出のため）。 */
 function snapshot(state: GameState): Snapshot {
   const urgentIds = new Set<number>();
+  // 待ち列の客 + 開始待ちで着席中の客、どちらも緊急化を検出する。
   for (const c of state.waiting) {
+    if (patienceRatio(c) > CONFIG.urgentRatio) urgentIds.add(c.id);
+  }
+  for (const c of seatedWaiting(state)) {
     if (patienceRatio(c) > CONFIG.urgentRatio) urgentIds.add(c.id);
   }
   const tableStatus = new Map<number, HanchanStatus>();
   for (const t of state.tables) tableStatus.set(t.id, t.progress.status);
-  return { waitingCount: state.waiting.length, urgentIds, tableStatus };
+  return {
+    waitingCount: state.waiting.length,
+    urgentIds,
+    tableStatus,
+    swapReady: swapReadyTables(state),
+  };
 }
 
 /** 直前スナップショットと現在 state を比較し、判断が必要な停止イベントが起きたか。 */
@@ -55,9 +92,16 @@ function detectStop(prev: Snapshot, state: GameState): boolean {
       if (prev.tableStatus.get(t.id) === "EAST") continue;
       if (t.seats.some((s) => s.occupant.kind === "STAFF")) return true;
     }
+    // ④' 卓が新たに「まもなく開始（満席・本走あり）」に＝開始前に本走を交代できる最後の機会。
+    for (const id of swapReadyTables(state)) {
+      if (!prev.swapReady.has(id)) return true;
+    }
   }
-  // ⑤ 待ち客が新たに緊急化（離脱前の最後の案内チャンス）。
+  // ⑤ 待ち客 or 開始待ち着席客が新たに緊急化（離脱前の最後のチャンス）。
   for (const c of state.waiting) {
+    if (!prev.urgentIds.has(c.id) && patienceRatio(c) > CONFIG.urgentRatio) return true;
+  }
+  for (const c of seatedWaiting(state)) {
     if (!prev.urgentIds.has(c.id) && patienceRatio(c) > CONFIG.urgentRatio) return true;
   }
   return false;
@@ -119,6 +163,11 @@ export function tick(state: GameState): void {
   // ① 時計
   state.clockMin += dt;
 
+  // ①' 人件費の発生（営業中は店員数ぶんの時給が累積＝利益を圧迫）。
+  if (state.phase !== "CLOSED") {
+    state.expenses.wages += (state.staff.length * CONFIG.wagePerHourYen * dt) / 60;
+  }
+
   // ② 閉店判定
   if (state.phase === "OPEN" && state.clockMin >= CONFIG.closeMin) {
     state.phase = "CLOSING";
@@ -130,6 +179,9 @@ export function tick(state: GameState): void {
 
   // ④ 待ち更新＋怒り/時間切れ離席
   tickWaiting(state, dt);
+
+  // ④' 開始待ちで着席中の客の待ち更新＋怒り離席
+  tickSeatedWaiting(state, dt);
 
   // ⑤ 各卓の半荘進行
   // 配列が teardown で変化しうるのでコピーを回す。

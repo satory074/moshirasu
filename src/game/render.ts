@@ -11,11 +11,12 @@ import {
   hanchanProgress,
   isClosed,
   kpis,
+  kyokuLabel,
   minsUntilLeave,
   patienceRatio,
   yen,
 } from "./selectors";
-import type { GameState, Rate, Seat, Table } from "./types";
+import type { GameState, Pref, Rate, Seat, Table } from "./types";
 
 /** UIから発行されるコマンド。 */
 export type Command =
@@ -24,6 +25,7 @@ export type Command =
   | { type: "honso"; tableId: number }
   | { type: "swap"; customerId: number; tableId: number }
   | { type: "combine"; a: number; b: number }
+  | { type: "hireStaff" }
   | { type: "advance" }
   | { type: "restart" };
 
@@ -50,12 +52,15 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     clock: must("#clock"),
     dayBar: must("#day-bar"),
     revenue: must("#revenue"),
+    profit: must("#profit"),
+    wages: must("#wages"),
     repBar: must("#rep-bar"),
     repText: must("#rep-text"),
     kpiTables: must("#kpi-tables"),
     kpiWaiting: must("#kpi-waiting"),
     kpiServed: must("#kpi-served"),
     kpiAvgwait: must("#kpi-avgwait"),
+    staff: must("#staff"),
     advanceWrap: must("#advance-wrap"),
     advanceBar: must("#advance-bar"),
     control: must("#control"),
@@ -114,6 +119,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
           ui.combineFirst = null;
         }
         rerender();
+        break;
+      case "hire-staff":
+        fire({ type: "hireStaff" });
         break;
       case "advance":
         fire({ type: "advance" });
@@ -186,25 +194,47 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     ui.selected = ui.selected.filter((id) => state.waiting.some((c) => c.id === id));
 
     // HUD
+    const k = kpis(state);
     el.clock.textContent = formatClock(state.clockMin);
     el.dayBar.style.width = `${(dayProgress(state) * 100).toFixed(1)}%`;
-    el.revenue.textContent = yen(state.revenue.total);
+    el.profit.textContent = yen(k.profit);
+    el.profit.style.color = k.profit >= 0 ? "var(--amber-ink)" : "var(--red)";
+    el.revenue.textContent = yen(k.revenue);
+    el.wages.textContent = `-${yen(k.wages)}`;
     el.repBar.style.width = `${state.reputation.toFixed(0)}%`;
     el.repBar.style.background = repColor(state.reputation);
     el.repText.textContent = `評判 ${Math.round(state.reputation)}`;
-    const k = kpis(state);
     el.kpiTables.textContent = `${k.tables}/${CONFIG.maxTables}`;
     el.kpiWaiting.textContent = String(k.waiting);
     el.kpiServed.textContent = String(k.served);
     el.kpiAvgwait.textContent = `${k.avgWait.toFixed(0)}分`;
     el.waitingCount.textContent = String(state.waiting.length);
 
+    renderStaff(state);
     renderAdvance(state);
     renderControl(state);
     renderTables(state);
     renderWaiting(state);
     renderLog(state);
     renderResult(state);
+  }
+
+  function renderStaff(state: GameState) {
+    const total = state.staff.length;
+    const busy = state.staff.filter((s) => s.busy).length;
+    const free = total - busy;
+    const atMax = total >= CONFIG.maxStaff;
+    const hireBtn = isClosed(state)
+      ? ""
+      : `<button data-action="hire-staff" class="mini mini-staff" ${atMax ? "disabled" : ""}>➕ 雇う（時給${yen(CONFIG.wagePerHourYen)}）</button>`;
+    el.staff.innerHTML = `
+      <div class="staff-info">
+        <span class="staff-emoji">🧑‍💼</span>
+        <span class="staff-count">店員 <b>${total}</b>人</span>
+        <span class="staff-detail">本走中 ${busy} ・ 空き ${free}</span>
+        <span class="staff-wage">人件費 ${yen(state.expenses.wages)}</span>
+      </div>
+      <div class="staff-actions">${hireBtn}</div>`;
   }
 
   function renderAdvance(state: GameState) {
@@ -303,19 +333,20 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     bar.style.width = `${(hanchanProgress(t) * 100).toFixed(1)}%`;
     bar.style.background = t.rate === "BLUE" ? "var(--blue)" : "var(--green)";
 
-    const playing = t.progress.status === "EAST" || t.progress.status === "SOUTH";
     const waitingStart = t.progress.status === "WAITING_TO_START";
 
-    // 待ち客を選択中かつ開始待ちの卓なら、空席に「ここに案内」ヒントを出す
-    const seatGuide = waitingStart && ui.selected.length > 0;
-    const seatsHtml = t.seats.map((s) => seatHtml(state, s, seatGuide)).join("");
-
-    // アクションボタン
+    // アクション判定
     const hasEmpty = t.seats.some((s) => s.occupant.kind === "EMPTY");
     const hasHonsoSeat = t.seats.some((s) => s.occupant.kind === "STAFF");
     const custCount = t.seats.filter((s) => s.occupant.kind === "CUSTOMER").length;
     const freeStaff = state.staff.some((s) => !s.busy);
-    const canSwap = playing && hasHonsoSeat && t.progress.status === "EAST";
+    // 交代: 東場、または「まもなく開始（満席・本走あり）」で可能。
+    const canSwap = hasHonsoSeat && (t.progress.status === "EAST" || (waitingStart && !hasEmpty));
+
+    // 待ち客を選択中かつ開始待ちの卓なら、空席に「ここに案内」ヒントを出す
+    const seatGuide = waitingStart && ui.selected.length > 0;
+    const seatsHtml = t.seats.map((s) => seatHtml(state, s, seatGuide, waitingStart)).join("");
+
     const btns: string[] = [];
     if (waitingStart && hasEmpty) {
       btns.push(`<button data-action="seat" data-id="${t.id}" class="mini">👉 案内</button>`);
@@ -336,22 +367,30 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     let hint = "";
     if (waitingStart && hasEmpty) {
       hint = `<div class="tc-hint">💡 空席あり — 待ち客を「案内」、または「本走」で店員を入れて開始</div>`;
+    } else if (canSwap && waitingStart) {
+      hint = `<div class="tc-hint tc-hint-time">⏳ 開始前に「交代」で本走を待ち客に替えられます</div>`;
     } else if (canSwap) {
-      hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ「交代」で待ち客を入れられます</div>`;
+      hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ「交代」で本走を待ち客に替えられます</div>`;
     }
 
     tbody.innerHTML = `<div class="seats">${seatsHtml}</div>${hint}<div class="tc-actions">${btns.join("")}</div>`;
   }
 
-  function seatHtml(state: GameState, s: Seat, guide = false): string {
+  function seatHtml(state: GameState, s: Seat, guide = false, waitingStart = false): string {
     if (s.occupant.kind === "EMPTY") {
       return guide
         ? `<div class="seat seat-empty seat-guide">＋ ここに案内</div>`
         : `<div class="seat seat-empty">空席</div>`;
     }
+    const dealer = s.isDealer ? `<span class="seat-dealer" title="親">親</span>` : "";
+    const pts = `<div class="seat-pts">${s.points.toLocaleString()}点</div>`;
     if (s.occupant.kind === "STAFF") {
       const st = state.staff.find((x) => x.id === (s.occupant as { staffId: number }).staffId);
-      return `<div class="seat seat-staff"><div class="seat-name">🧑‍💼 ${st?.name ?? "店員"}</div><div class="seat-badge">本走</div></div>`;
+      return `<div class="seat seat-staff">
+        <div class="seat-name">🧑‍💼 ${st?.name ?? "店員"}${dealer}</div>
+        <div class="seat-badge">本走</div>
+        ${pts}
+      </div>`;
     }
     const c = state.customers.get(s.occupant.customerId);
     if (!c) return `<div class="seat seat-empty">空席</div>`;
@@ -359,9 +398,19 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       ? `<span class="call ${s.call === "LASTHAN" ? "call-last" : "call-mosh"}" title="${s.call === "LASTHAN" ? "ラスハン（この半荘で最後）" : "モシラス（続けるかも）"}">${s.call === "LASTHAN" ? "L" : "M"}</span>`
       : "";
     const low = c.bankroll <= c.startBankroll * 0.3 ? "seat-low" : "";
+    // 入店時の希望（着席後も分かるように常時表示）。
+    const prefBadge = prefBadgeHtml(c.pref);
+    // 開始待ち（半荘前）は「開始待ち」時間を表示。我慢ゲージ比で色付け。
+    let waitLine = "";
+    if (waitingStart) {
+      const pr = patienceRatio(c);
+      waitLine = `<div class="seat-wait ${pr > 0.75 ? "seat-wait-urgent" : ""}">開始待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</div>`;
+    }
     return `<div class="seat seat-cust ${low}">
-      <div class="seat-name">${c.emoji} ${c.name}</div>
+      <div class="seat-name">${c.emoji} ${c.name}${dealer} ${prefBadge}</div>
       <div class="seat-meta">${yen(c.bankroll)}</div>
+      ${pts}
+      ${waitLine}
       ${call}
     </div>`;
   }
@@ -389,12 +438,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       const selected = ui.selected.includes(c.id);
       const pr = patienceRatio(c);
       chip.className = `wchip ${selected ? "selected-ring" : ""} ${pr > 0.75 ? "wchip-urgent" : ""}`;
-      const prefBadge =
-        c.pref === "BLUE"
-          ? `<span class="pref pref-blue">点5</span>`
-          : c.pref === "GREEN"
-            ? `<span class="pref pref-green">点3</span>`
-            : `<span class="pref pref-any">どちらでも</span>`;
+      const prefBadge = prefBadgeHtml(c.pref);
       const leaveIn = minsUntilLeave(state, c);
       const check = selected ? `<span class="w-check">✓</span> ` : "";
       const urgentBadge = pr > 0.75 ? `<span class="w-urgent-badge">急</span>` : "";
@@ -445,7 +489,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       return;
     }
     const k = kpis(state);
-    const { rank, comment } = scoreRank(state.revenue.total);
+    const { rank, comment } = scoreRank(k.profit);
     el.result.className = "result-overlay show";
     el.result.innerHTML = `
       <div class="result-card">
@@ -453,8 +497,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         <div class="result-title">本日の営業終了</div>
         <div class="result-comment">${comment}</div>
         <div class="result-grid">
-          <div><span>総売上</span><b>${yen(state.revenue.total)}</b></div>
-          <div><span>うち場代</span><b>${yen(state.revenue.gameFee)}</b></div>
+          <div><span>利益</span><b>${yen(k.profit)}</b></div>
+          <div><span>売上（場代）</span><b>${yen(k.revenue)}</b></div>
+          <div><span>人件費</span><b class="bad">-${yen(k.wages)}</b></div>
           <div><span>接客した客数</span><b>${k.served}人</b></div>
           <div><span>打たれた半荘</span><b>${state.stats.hanchanPlayed}回</b></div>
           <div><span>満足して帰った</span><b>${state.stats.satisfied}人</b></div>
@@ -478,14 +523,20 @@ function statusLabel(t: Table): string {
     case "WAITING_TO_START":
       return t.seats.every((s) => s.occupant.kind !== "EMPTY") ? "まもなく開始" : "席埋め中";
     case "EAST":
-      return "東場";
     case "SOUTH":
-      return "南場";
+      return kyokuLabel(t); // 例: 東2局 / 南4局 1本場
     case "SETTLING":
       return "精算中";
     default:
       return "";
   }
+}
+
+/** 希望卓バッジ（待ち列・着席後で共用）。 */
+function prefBadgeHtml(pref: Pref): string {
+  if (pref === "BLUE") return `<span class="pref pref-blue">点5</span>`;
+  if (pref === "GREEN") return `<span class="pref pref-green">点3</span>`;
+  return `<span class="pref pref-any">どちらでも</span>`;
 }
 
 function repColor(r: number): string {
@@ -504,7 +555,11 @@ const SHELL = `
     <div class="day-track"><div id="day-bar" class="bar-fill day-bar"></div></div>
   </div>
   <div class="hud-mid">
-    <div class="rev-wrap"><span class="rev-label">本日の売上</span><span id="revenue" class="rev">¥0</span></div>
+    <div class="rev-wrap"><span class="rev-label">利益</span><span id="profit" class="rev">¥0</span></div>
+    <div class="rev-sub">
+      <span>売上 <b id="revenue">¥0</b></span>
+      <span>人件費 <b id="wages" class="bad">-¥0</b></span>
+    </div>
     <div class="rep-wrap">
       <div id="rep-text" class="rep-text">評判 70</div>
       <div class="rep-track"><div id="rep-bar" class="bar-fill rep-bar"></div></div>
@@ -524,6 +579,7 @@ const SHELL = `
 <div class="main">
   <section class="col col-tables">
     <h2 class="col-h">卓（フロア）</h2>
+    <div id="staff" class="staff-card"></div>
     <div id="control" class="control"></div>
     <div id="tables" class="tables"></div>
   </section>

@@ -6,6 +6,7 @@ import { createInitialState } from "../src/game/state";
 import { tick } from "../src/game/engine";
 import {
   combineAction,
+  hireStaffAction,
   honsoAction,
   openTableAction,
   seatCustomerAction,
@@ -13,22 +14,35 @@ import {
 import { firstEmptyIdx } from "../src/game/tables";
 import type { GameState, Rate } from "../src/game/types";
 
-// ---- 1) 精算がゼロサムか（場代・祝儀を除いた素点ベース）----
+// ---- 1) 精算がゼロサムか（実点棒ベース・場代/祝儀を除いた素点ベース）----
 {
   const state = createInitialState(42);
-  // ダミー卓を作って精算を100回検証
+  // ダミー卓を作って精算を200回検証。実点棒は局シミュ同様「合計100000」になるよう生成。
   let maxAbsSum = 0;
   for (let i = 0; i < 200; i++) {
-    const seats = [0, 1, 2, 3].map(() => ({
+    // ランダムに点棒を振り分け、合計を 100000 にゼロサム化（マイナスも許容）。
+    const raw = [0, 1, 2, 3].map(() => state.rng.range(-20000, 60000));
+    const adj = (raw.reduce((a, b) => a + b, 0) - 100000) / 4;
+    const pts = raw.map((p) => Math.round(p - adj));
+    pts[3] += 100000 - pts.reduce((a, b) => a + b, 0); // 端数を1席で吸収→合計ちょうど100000
+    const seats = [0, 1, 2, 3].map((idx) => ({
       occupant: { kind: "STAFF" as const, staffId: 0 },
-      points: 25000,
-      isDealer: false,
+      points: pts[idx],
+      isDealer: idx === 0,
     }));
     const table = {
       id: 1,
       rate: "GREEN" as Rate, // GREENは祝儀なし → 完全ゼロサムのはず
       seats: seats as never,
-      progress: { status: "SETTLING" as const, elapsedMin: 0, hanchanCount: 0 },
+      progress: {
+        status: "SETTLING" as const,
+        elapsedMin: 0,
+        hanchanCount: 0,
+        kyoku: 4,
+        honba: 0,
+        dealerSeat: 0,
+        resolvedKyoku: 8,
+      },
       openedAtMin: 720,
     };
     const res = settleHanchan(table, state.customers, state.rng);
@@ -124,21 +138,69 @@ function autoPlayBlue(seed: number): GameState {
 }
 
 let totalRev = 0;
+let totalProfit = 0;
 let busts = 0;
 let rage = 0;
 let hanchan = 0;
 for (const seed of [1, 7, 42, 100, 2024]) {
   const s = autoPlay(seed);
+  const profit = s.revenue.total - s.expenses.wages;
   totalRev += s.revenue.total;
+  totalProfit += profit;
   busts += s.stats.busts;
   rage += s.stats.rageQuits;
   hanchan += s.stats.hanchanPlayed;
   console.log(
-    `[day seed=${seed}] 売上=¥${s.revenue.total.toLocaleString()} 半荘=${s.stats.hanchanPlayed} 接客=${s.stats.served} 怒=${s.stats.rageQuits} 飛=${s.stats.busts} 評判=${Math.round(s.reputation)} phase=${s.phase}`,
+    `[day seed=${seed}] 売上=¥${s.revenue.total.toLocaleString()} 人件費=¥${Math.round(s.expenses.wages).toLocaleString()} 利益=¥${Math.round(profit).toLocaleString()} 半荘=${s.stats.hanchanPlayed} 接客=${s.stats.served} 怒=${s.stats.rageQuits} 飛=${s.stats.busts} 評判=${Math.round(s.reputation)} phase=${s.phase}`,
   );
   if (s.phase !== "CLOSED") throw new Error("day did not close");
+  // 人件費が発生していること（営業時間×店員数）。
+  if (s.expenses.wages <= 0) throw new Error("no wages accrued");
 }
-console.log(`\n[summary] 5日平均売上=¥${Math.round(totalRev / 5).toLocaleString()} 総半荘=${hanchan} 総飛=${busts} 総怒=${rage}`);
+console.log(
+  `\n[summary] 5日平均 売上=¥${Math.round(totalRev / 5).toLocaleString()} 利益=¥${Math.round(totalProfit / 5).toLocaleString()} 総半荘=${hanchan} 総飛=${busts} 総怒=${rage}`,
+);
 if (totalRev <= 0) throw new Error("no revenue generated");
 if (hanchan <= 0) throw new Error("no hanchan played");
+
+// ---- 3) 店員雇用と局シミュの不変条件 ----
+{
+  const state = createInitialState(7);
+  const before = state.staff.length;
+  const r = hireStaffAction(state);
+  if (!r.ok) throw new Error("hire failed");
+  if (state.staff.length !== before + 1) throw new Error("staff not incremented");
+  // 上限まで雇えるか
+  while (hireStaffAction(state).ok) {
+    /* loop */
+  }
+  if (state.staff.length !== CONFIG.maxStaff) throw new Error("maxStaff not enforced");
+  console.log(`[hire] 店員 ${before}→${state.staff.length}（上限${CONFIG.maxStaff}）`);
+}
+
+// ---- 4) 局シミュ: 半荘中の点棒合計は常に 100000（ゼロサム移動）----
+{
+  const state = createInitialState(123);
+  let checks = 0;
+  let guard = 0;
+  while (state.phase !== "CLOSED" && guard < 100000) {
+    guard++;
+    autoManage(state);
+    tick(state);
+    for (const t of state.tables) {
+      if (t.progress.status === "EAST" || t.progress.status === "SOUTH") {
+        const sum = t.seats.reduce((a, s) => a + s.points, 0);
+        if (sum !== 100000) throw new Error(`点棒合計が100000でない: ${sum}（卓#${t.id}）`);
+        checks++;
+      }
+    }
+  }
+  console.log(`[kyoku] 対局中の点棒合計=100000 を ${checks} 回確認`);
+  if (checks === 0) throw new Error("no in-play point-sum checks ran");
+}
+
+// ---- 5) 卓数上限が12 ----
+if (CONFIG.maxTables !== 12) throw new Error(`maxTables expected 12, got ${CONFIG.maxTables}`);
+console.log(`[tables] maxTables=${CONFIG.maxTables}`);
+
 console.log("\n✅ smoke test passed");

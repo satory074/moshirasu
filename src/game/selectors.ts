@@ -24,6 +24,8 @@ export function dayProgress(state: GameState): number {
 /** 主要KPI。 */
 export function kpis(state: GameState): {
   revenue: number;
+  wages: number;
+  profit: number;
   served: number;
   waiting: number;
   tables: number;
@@ -35,8 +37,11 @@ export function kpis(state: GameState): {
     state.stats.waitSamples > 0
       ? state.stats.totalWaitMin / state.stats.waitSamples
       : 0;
+  const wages = state.expenses.wages;
   return {
     revenue: state.revenue.total,
+    wages,
+    profit: state.revenue.total - wages,
     served: state.stats.served,
     waiting: state.waiting.length,
     tables: state.tables.length,
@@ -46,16 +51,25 @@ export function kpis(state: GameState): {
   };
 }
 
+/** 局ラベル（例: 「東2局」「南4局 1本場」）。対局中以外は空文字。 */
+export function kyokuLabel(table: Table): string {
+  const p = table.progress;
+  if (p.status !== "EAST" && p.status !== "SOUTH") return "";
+  const ba = p.status === "EAST" ? "東" : "南";
+  const honba = p.honba > 0 ? ` ${p.honba}本場` : "";
+  return `${ba}${p.kyoku}局${honba}`;
+}
+
 /** 閉店したか。 */
 export function isClosed(state: GameState): boolean {
   return state.phase === "CLOSED";
 }
 
-/** 半荘の進行 0..1（東+南）。 */
+/** 半荘の進行 0..1（標準8局＝東1〜南4を目安にした経過）。 */
 export function hanchanProgress(table: Table): number {
-  const total = CONFIG.eastMin + CONFIG.southMin;
   if (table.progress.status === "WAITING_TO_START") return 0;
   if (table.progress.status === "SETTLING" || table.progress.status === "DONE") return 1;
+  const total = 8 * CONFIG.kyoku.kyokuMin; // 標準8局ぶんの目安時間
   return Math.max(0, Math.min(1, table.progress.elapsedMin / total));
 }
 

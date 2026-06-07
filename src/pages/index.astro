@@ -769,6 +769,92 @@ import "../styles/globals.css";
         border-radius: 4px;
       }
 
+      /* ===== 利益サブ表示（HUD）===== */
+      .rev-sub {
+        display: flex;
+        gap: 0.7rem;
+        font-size: 0.66rem;
+        color: var(--muted);
+        margin-top: 0.1rem;
+      }
+      .rev-sub b {
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+      }
+      .rev-sub b.bad {
+        color: var(--red);
+      }
+
+      /* ===== 店員カード ===== */
+      .staff-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-left: 3px solid #7c3aed;
+        border-radius: var(--r-md);
+        padding: 0.5rem 0.7rem;
+        margin-bottom: 0.6rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+      }
+      .staff-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-size: 0.74rem;
+      }
+      .staff-emoji {
+        font-size: 1rem;
+      }
+      .staff-count b {
+        font-size: 1rem;
+      }
+      .staff-detail,
+      .staff-wage {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .staff-actions {
+        display: flex;
+        gap: 0.3rem;
+      }
+      .mini[disabled] {
+        opacity: 0.45;
+        filter: grayscale(0.4);
+      }
+
+      /* ===== 卓の席: 点棒・親・希望・開始待ち ===== */
+      .seat-pts {
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        font-size: 0.72rem;
+      }
+      .seat-dealer {
+        background: #b45309;
+        color: #fff;
+        font-size: 0.58rem;
+        font-weight: 800;
+        border-radius: 4px;
+        padding: 0 0.25rem;
+        margin-left: 0.2rem;
+      }
+      .seat-cust .pref,
+      .seat-staff .pref {
+        margin-left: 0.2rem;
+      }
+      .seat-wait {
+        font-size: 0.64rem;
+        color: var(--muted);
+      }
+      .seat-wait-urgent {
+        color: var(--red);
+        font-weight: 700;
+      }
+
       /* ===== レスポンシブ（スマホ）===== */
       @media (max-width: 960px) {
         .main {

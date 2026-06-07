@@ -2,6 +2,7 @@
 
 import {
   combineAction,
+  hireStaffAction,
   honsoAction,
   openTableAction,
   seatCustomerAction,
@@ -41,6 +42,8 @@ export function boot(): void {
         return toRes(swapAction(state, cmd.customerId, cmd.tableId));
       case "combine":
         return toRes(combineAction(state, cmd.a, cmd.b));
+      case "hireStaff":
+        return toRes(hireStaffAction(state));
       case "advance":
         engine.advance();
         return { ok: true };

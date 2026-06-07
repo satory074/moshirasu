@@ -14,12 +14,45 @@ export const CONFIG = {
   urgentRatio: 0.75, // 待ち客の「緊急」しきい値（我慢ゲージ比。停止条件＆赤表示に共用）
 
   // ---- 半荘の長さ（分）----
-  eastMin: 7, // 東場（この間のみ交代可能）
-  southMin: 7, // 南場
-  // 合計14分/半荘 → 1日で1卓あたり最大 ~50半荘
+  // 局シミュ化に伴い、半荘長は「局数×kyokuMin」で可変（連荘で伸びる）。
+  // eastMin/southMin は进行バーや一部表示の目安として残す。
+  eastMin: 7, // 東場（目安）
+  southMin: 7, // 南場（目安）
+
+  // ---- 局シミュレーション（本格進行: 親番ローテ・局ごとの実点移動）----
+  kyoku: {
+    kyokuMin: 1.4, // 1局あたりの目安進行分
+    maxKyokuPerHanchan: 14, // 半荘の局数上限（連荘暴走ガード）
+    maxHonba: 4, // 本場の上限（超えたら親流れ）
+    ryuukyokuProb: 0.16, // 流局率
+    notenPenalty: 3000, // 流局のノーテン罰符（総額・テンパイ者で山分け）
+    tsumoProb: 0.42, // ツモ率（残りはロン）
+    winSkillW: 2.2, // 和了者抽選: 強さの効き
+    winLuckW: 1.4, // 和了者抽選: ツキの効き
+    dealerWinMult: 1.25, // 親は和了しやすい
+    // 手の点数分布（点, 重み）。ヘビーテール。大物手の直撃で点棒が大きく振れ、
+    // 点5では薄い資金の客が飛びうる（高レートのリスク＝このゲームの肝）。
+    handValues: [
+      [1500, 26],
+      [2900, 23],
+      [3900, 18],
+      [5200, 12],
+      [7700, 9],
+      [8000, 7],
+      [12000, 4.5],
+      [16000, 2.2],
+      [24000, 1],
+      [32000, 0.5],
+    ] as [number, number][],
+    // 着席後（半荘前）の待ちは、列で待つより気が長い。我慢ゲージの進みを緩める。
+    seatedWaitMult: 0.5,
+    // 点5(BLUE)は赤・祝儀の世界で手が大きく振れる。点5卓の手の点数を増幅し、
+    // 薄い資金の客が飛ぶ「高レートの怖さ」を演出する（点3=GREENは等倍）。
+    blueHandMult: 1.5,
+  },
 
   // ---- 卓数 ----
-  maxTables: 4,
+  maxTables: 12,
 
   // ---- 来店 ----
   // 時間帯別の相対重み（昼ピーク・夜ピーク）。キーは「時」。
@@ -39,7 +72,7 @@ export const CONFIG = {
   } as Record<number, number>,
   baseArrivalChancePerTick: 0.13, // 1tickあたりの来店確率の基準値
   reputationArrivalFactor: 0.6, // 評判が低いと来店を抑制する強さ（0で無影響）
-  maxWaitingSpawn: 12, // 待ち列がこれ以上なら来店抑制（席が無いのに溢れさせない）
+  maxWaitingSpawn: 16, // 待ち列がこれ以上なら来店抑制（卓数12に合わせ少し広げる）
 
   // ---- 希望分布 ----
   prefWeights: { BLUE: 0.25, GREEN: 0.35, ANY: 0.4 } as Record<string, number>,
@@ -89,26 +122,31 @@ export const CONFIG = {
     start: 70,
     max: 100,
     min: 0,
-    rageHit: 4, // 怒り離席で減
+    rageHit: 3, // 怒り離席で減
     bustHit: 1.5, // 飛びで減
     serveGain: 0.6, // 着席させると増
     satisfiedGain: 1.0, // 満足して帰すと増
   },
 
+  // ---- 店員・人件費・利益 ----
+  staffCount: 2, // 開店時の店員数（本走に入れる）
+  maxStaff: 10, // 雇える店員の上限
+  wagePerHourYen: 1200, // 店員1人あたりの時給（人件費）。雇うほど利益を圧迫。
+  targetProfit: 90000, // スコア評価の基準（利益＝売上−人件費）
+
   // ---- その他 ----
-  staffCount: 2, // 本走に入れる店員の人数
   logCap: 120,
-  targetRevenue: 120000, // スコア評価の基準（S/A/B/C 判定）
+  targetRevenue: 120000, // 旧基準（参考値）
 
   // 客が来店時に既存卓へ案内されるのを待つ猶予など、将来の拡張用フック。
 } as const;
 
-/** 評価レター。 */
-export function scoreRank(revenue: number): { rank: string; comment: string } {
-  const t = CONFIG.targetRevenue;
-  if (revenue >= t * 1.5) return { rank: "S", comment: "伝説の雀荘マネージャー！" };
-  if (revenue >= t * 1.2) return { rank: "A", comment: "見事な卓回し。常連も大満足。" };
-  if (revenue >= t * 0.9) return { rank: "B", comment: "堅実な営業。及第点。" };
-  if (revenue >= t * 0.6) return { rank: "C", comment: "もう少し回転を上げたい。" };
-  return { rank: "D", comment: "卓が立たず閑古鳥…修行あるのみ。" };
+/** 評価レター（利益＝売上−人件費 で判定）。 */
+export function scoreRank(profit: number): { rank: string; comment: string } {
+  const t = CONFIG.targetProfit;
+  if (profit >= t * 1.5) return { rank: "S", comment: "伝説の雀荘マネージャー！" };
+  if (profit >= t * 1.2) return { rank: "A", comment: "見事な卓回し。常連も大満足。" };
+  if (profit >= t * 0.9) return { rank: "B", comment: "堅実な営業。及第点。" };
+  if (profit >= t * 0.6) return { rank: "C", comment: "もう少し回転を上げたい。" };
+  return { rank: "D", comment: "人件費に見合う回転を作ろう…修行あるのみ。" };
 }

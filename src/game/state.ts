@@ -23,6 +23,7 @@ export function createInitialState(seed: number): GameState {
     customers: new Map(),
     staff,
     revenue: { gameFee: 0, tips: 0, total: 0 },
+    expenses: { wages: 0 },
     reputation: CONFIG.reputation.start,
     stats: {
       served: 0,
