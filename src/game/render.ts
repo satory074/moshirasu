@@ -229,12 +229,28 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       .map((id) => state.waiting.find((c) => c.id === id)?.name ?? "")
       .filter(Boolean)
       .join("・");
+    const step1Active = n === 0;
+    const step2Active = n > 0;
+    // 待ち客がいるのに未選択なら、最初の操作（①）に注意を促す
+    const attention = n === 0 && state.waiting.length > 0 ? "step-attention" : "";
     el.control.innerHTML = `
       <div class="ctl-title">卓を立てる</div>
-      <div class="ctl-sel">${n > 0 ? `選択中(${n}/4): ${names}` : "待ち客をクリックして選択（最大4人）"}</div>
-      <div class="ctl-btns">
-        <button data-action="open-table" data-rate="BLUE" class="btn btn-blue" ${n === 0 ? "disabled" : ""}>🔵 ブルー卓(点5)で立てる</button>
-        <button data-action="open-table" data-rate="GREEN" class="btn btn-green" ${n === 0 ? "disabled" : ""}>🟢 グリーン卓(点3)で立てる</button>
+      <div class="ctl-step ${step1Active ? "step-active" : ""} ${attention}">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-label">待ち客をタップで選択（最大4人）</div>
+          <div class="step-sel">${n > 0 ? `選択中(${n}/4): ${names}` : ""}</div>
+        </div>
+      </div>
+      <div class="ctl-step ${step2Active ? "step-active" : ""}">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-label">卓のレートを選ぶ</div>
+          <div class="ctl-btns">
+            <button data-action="open-table" data-rate="BLUE" class="btn btn-blue" ${n === 0 ? "disabled" : ""}>🔵 ブルー卓(点5)で立てる</button>
+            <button data-action="open-table" data-rate="GREEN" class="btn btn-green" ${n === 0 ? "disabled" : ""}>🟢 グリーン卓(点3)で立てる</button>
+          </div>
+        </div>
       </div>
       <div class="ctl-hint">3人以下でも立てて「本走」で店員を入れれば対局できます。点5は場代${yen(CONFIG.gameFeeYen.BLUE)}/半荘、点3は${yen(CONFIG.gameFeeYen.GREEN)}/半荘。</div>
     `;
@@ -293,7 +309,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const playing = t.progress.status === "EAST" || t.progress.status === "SOUTH";
     const waitingStart = t.progress.status === "WAITING_TO_START";
 
-    const seatsHtml = t.seats.map((s) => seatHtml(state, s)).join("");
+    // 待ち客を選択中かつ開始待ちの卓なら、空席に「ここに案内」ヒントを出す
+    const seatGuide = waitingStart && ui.selected.length > 0;
+    const seatsHtml = t.seats.map((s) => seatHtml(state, s, seatGuide)).join("");
 
     // アクションボタン
     const hasEmpty = t.seats.some((s) => s.occupant.kind === "EMPTY");
@@ -319,9 +337,11 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     tbody.innerHTML = `<div class="seats">${seatsHtml}</div><div class="tc-actions">${btns.join("")}</div>`;
   }
 
-  function seatHtml(state: GameState, s: Seat): string {
+  function seatHtml(state: GameState, s: Seat, guide = false): string {
     if (s.occupant.kind === "EMPTY") {
-      return `<div class="seat seat-empty">空席</div>`;
+      return guide
+        ? `<div class="seat seat-empty seat-guide">＋ ここに案内</div>`
+        : `<div class="seat seat-empty">空席</div>`;
     }
     if (s.occupant.kind === "STAFF") {
       const st = state.staff.find((x) => x.id === (s.occupant as { staffId: number }).staffId);
@@ -370,8 +390,10 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
             ? `<span class="pref pref-green">点3</span>`
             : `<span class="pref pref-any">どちらでも</span>`;
       const leaveIn = minsUntilLeave(state, c);
+      const check = selected ? `<span class="w-check">✓</span> ` : "";
+      const urgentBadge = pr > 0.75 ? `<span class="w-urgent-badge">急</span>` : "";
       chip.querySelector<HTMLElement>(".wbody")!.innerHTML = `
-        <div class="w-top">${c.emoji} <span class="w-name">${c.name}</span> ${prefBadge}</div>
+        <div class="w-top">${check}${c.emoji} <span class="w-name">${c.name}</span>${urgentBadge} ${prefBadge}</div>
         <div class="w-meta">資金${yen(c.bankroll)}・帰宅まで${leaveIn}分</div>
         <div class="w-wait ${pr > 0.75 ? "pulse-warn" : ""}">待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</div>`;
       const pbar = chip.querySelector<HTMLElement>("[data-patience]")!;

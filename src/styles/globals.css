@@ -2,18 +2,35 @@
 
 /* ===== デザイントークン ===== */
 :root {
-  --felt: #0f3d2e; /* 麻雀卓のフェルト緑 */
-  --felt-dark: #0a2c20;
+  /* elevation サーフェススケール（純黒をやめ、明度差で階層化） */
+  --bg-top: #1a2820; /* やわらかい深緑 */
+  --bg-bottom: #10130f;
+  --surface-1: #1e2b24; /* パネル（hud / control / log）*/
+  --surface-2: #26352c; /* カード（table-card / wchip）*/
+  --surface-3: #324036; /* 操作要素ベース・ホバー面 */
+  --border: #38493e;
+  --border-strong: #4a5f51;
+
+  /* 意味色（卓レート/状態）— 暗い面で少しトーンアップ */
+  --felt: #1c4a38; /* 麻雀卓のフェルト緑 */
+  --felt-dark: #14392b;
   --blue: #2563eb; /* ブルー卓(点5) */
+  --blue-bright: #3b82f6; /* ボタン地用 */
   --blue-soft: #1e3a8a;
   --green: #16a34a; /* グリーン卓(点3) */
+  --green-bright: #22c55e; /* ボタン地用 */
   --green-soft: #14532d;
-  --amber: #f59e0b; /* モシラス */
-  --red: #ef4444; /* ラスハン */
-  --ink: #f8fafc;
-  --muted: #94a3b8;
-  --panel: #1e293b;
-  --panel-2: #0f172a;
+  --amber: #f59e0b; /* モシラス・選択 */
+  --red: #ef4444; /* ラスハン・緊急 */
+
+  /* テキスト */
+  --ink: #f1f5f3; /* 純白を少し落として眩しさ軽減 */
+  --muted: #b3c2b7; /* 暗い面でも読めるよう明るめに */
+
+  /* 半径（3段階に統一）*/
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
 }
 
 html,
@@ -21,7 +38,8 @@ body {
   margin: 0;
   height: 100%;
   background:
-    radial-gradient(1200px 800px at 50% -10%, #143b2c 0%, #0a1a14 60%, #060d0a 100%);
+    linear-gradient(180deg, var(--bg-top) 0%, #161f19 45%, var(--bg-bottom) 100%);
+  background-attachment: fixed;
   color: var(--ink);
   font-family:
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, -apple-system,
@@ -33,14 +51,38 @@ body {
   box-sizing: border-box;
 }
 
+/* ===== ボタン共通: 押せると分かる signifier ===== */
 button {
   font-family: inherit;
   cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease,
+    box-shadow 0.12s ease,
+    background-color 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.4;
+  opacity: 0.45;
+  filter: grayscale(0.4);
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 /* スムーズなバー遷移（半荘進行・我慢ゲージ） */
@@ -77,10 +119,11 @@ button:disabled {
   animation: log-in 0.25s ease-out;
 }
 
-/* 選択中のハイライト */
+/* 選択中のハイライト（塗り＋枠で「選択済み」を明確に）*/
 .selected-ring {
   outline: 2px solid var(--amber);
-  outline-offset: 2px;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
 }
 
 /* スクロールバー控えめに */

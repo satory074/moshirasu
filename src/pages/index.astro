@@ -72,11 +72,10 @@ import "../styles/globals.css";
         grid-template-columns: 1.2fr 1.3fr 1.6fr;
         gap: 0.75rem;
         align-items: center;
-        background: linear-gradient(180deg, #18243a, #111b2e);
-        border: 1px solid #243049;
-        border-radius: 14px;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-radius: var(--r-lg);
         padding: 0.7rem 1rem;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
       }
       .clock-wrap,
       .rev-wrap {
@@ -103,7 +102,7 @@ import "../styles/globals.css";
       .day-track,
       .rep-track {
         height: 6px;
-        background: #0b1422;
+        background: rgba(0, 0, 0, 0.25);
         border-radius: 4px;
         overflow: hidden;
         margin-top: 0.35rem;
@@ -134,9 +133,10 @@ import "../styles/globals.css";
         display: flex;
         flex-direction: column;
         align-items: center;
-        background: #0d1729;
-        border-radius: 8px;
-        padding: 0.25rem;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-sm);
+        padding: 0.3rem 0.25rem;
       }
       .kpi span {
         font-size: 0.62rem;
@@ -152,11 +152,11 @@ import "../styles/globals.css";
         justify-content: flex-end;
       }
       .spd {
-        background: #1f2b44;
+        background: var(--surface-3);
         color: var(--ink);
-        border: 1px solid #324260;
-        border-radius: 7px;
-        padding: 0.25rem 0.6rem;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-sm);
+        padding: 0.3rem 0.65rem;
         font-size: 0.78rem;
         font-weight: 700;
       }
@@ -177,7 +177,8 @@ import "../styles/globals.css";
       .col-h {
         margin: 0 0 0.5rem;
         font-size: 0.95rem;
-        color: #cbd5e1;
+        font-weight: 700;
+        color: var(--ink);
         display: flex;
         align-items: center;
         gap: 0.4rem;
@@ -193,47 +194,106 @@ import "../styles/globals.css";
 
       /* ===== コントロール（卓を立てる）===== */
       .control {
-        background: #122033;
-        border: 1px solid #233149;
-        border-radius: 12px;
-        padding: 0.6rem 0.75rem;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        padding: 0.7rem 0.8rem;
         margin-bottom: 0.6rem;
       }
       .ctl-title {
         font-weight: 800;
-        font-size: 0.85rem;
-        margin-bottom: 0.2rem;
+        font-size: 0.9rem;
+        margin-bottom: 0.55rem;
       }
-      .ctl-sel {
+      /* 手順ステップ（①②）*/
+      .ctl-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.4rem 0.5rem;
+        border-radius: var(--r-sm);
+        margin-bottom: 0.4rem;
+        background: transparent;
+        border: 1px solid transparent;
+        transition: background-color 0.15s;
+      }
+      .ctl-step.step-active {
+        background: rgba(245, 158, 11, 0.1);
+        border-color: rgba(245, 158, 11, 0.45);
+      }
+      .step-num {
+        flex-shrink: 0;
+        width: 1.3rem;
+        height: 1.3rem;
+        border-radius: 999px;
+        background: var(--surface-3);
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .step-active .step-num {
+        background: var(--amber);
+        color: #1a1206;
+      }
+      /* 待ち客がいるのに未操作なら、最初のステップを軽く点滅させて誘導 */
+      @keyframes step-attention {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.22);
+        }
+      }
+      .ctl-step.step-attention {
+        animation: step-attention 1.6s ease-in-out infinite;
+      }
+      .step-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .step-label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .step-sel {
         font-size: 0.74rem;
         color: #fcd34d;
-        min-height: 1.1em;
-        margin-bottom: 0.4rem;
+        margin-top: 0.15rem;
+        min-height: 1.05em;
       }
       .ctl-btns {
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
+        margin-top: 0.35rem;
       }
       .ctl-hint {
-        margin-top: 0.4rem;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
         font-size: 0.68rem;
         color: var(--muted);
-        line-height: 1.4;
+        line-height: 1.45;
       }
       .btn {
         border: none;
-        border-radius: 9px;
-        padding: 0.5rem 0.8rem;
+        border-radius: var(--r-md);
+        padding: 0.6rem 0.9rem;
         font-weight: 800;
-        font-size: 0.82rem;
+        font-size: 0.84rem;
         color: white;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
       }
       .btn-blue {
-        background: var(--blue);
+        background: var(--blue-bright);
       }
       .btn-green {
-        background: var(--green);
+        background: var(--green-bright);
       }
 
       /* ===== 卓カード ===== */
@@ -243,17 +303,18 @@ import "../styles/globals.css";
         gap: 0.6rem;
       }
       .table-card {
-        background: radial-gradient(circle at 50% 0%, #15392b, #0c2a20 70%);
-        border: 1px solid #1d4d3a;
-        border-radius: 14px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--border-strong);
+        border-radius: var(--r-md);
         padding: 0.6rem;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       }
       .tc-blue {
-        border-color: #2c4d8a;
+        border-left-color: var(--blue);
       }
       .tc-green {
-        border-color: #1d6b3f;
+        border-left-color: var(--green);
       }
       .thead {
         display: flex;
@@ -290,9 +351,9 @@ import "../styles/globals.css";
         gap: 0.35rem;
       }
       .seat {
-        background: rgba(8, 20, 15, 0.7);
-        border: 1px solid #1c3a2c;
-        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.18);
+        border: 1px solid var(--border);
+        border-radius: var(--r-sm);
         padding: 0.35rem 0.4rem;
         min-height: 48px;
         font-size: 0.72rem;
@@ -303,8 +364,14 @@ import "../styles/globals.css";
       .seat-empty {
         align-items: center;
         justify-content: center;
-        color: #4b6457;
+        color: var(--muted);
         border-style: dashed;
+        border-color: var(--border-strong);
+      }
+      .seat-empty.seat-guide {
+        color: var(--amber);
+        border-color: rgba(245, 158, 11, 0.5);
+        background: rgba(245, 158, 11, 0.06);
       }
       .seat-name {
         font-weight: 700;
@@ -313,12 +380,12 @@ import "../styles/globals.css";
         text-overflow: ellipsis;
       }
       .seat-meta {
-        color: #9fd0b6;
+        color: var(--muted);
         font-variant-numeric: tabular-nums;
       }
       .seat-staff {
-        border-color: #5b3a8a;
-        background: rgba(40, 24, 64, 0.6);
+        border-color: #6d4aa0;
+        background: rgba(76, 47, 122, 0.35);
       }
       .seat-badge {
         align-self: flex-start;
@@ -353,21 +420,24 @@ import "../styles/globals.css";
         flex-wrap: wrap;
       }
       .mini {
-        background: #1f3a4d;
+        background: var(--surface-3);
         color: var(--ink);
-        border: 1px solid #2f5168;
-        border-radius: 7px;
-        padding: 0.28rem 0.6rem;
-        font-size: 0.74rem;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-sm);
+        padding: 0.32rem 0.7rem;
+        font-size: 0.75rem;
         font-weight: 700;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
       }
       .mini-staff {
-        background: #4c2f7a;
-        border-color: #6b46a8;
+        background: #5d3a96;
+        border-color: #7c52bd;
+        color: #fff;
       }
       .mini-swap {
-        background: #155e54;
-        border-color: #1d8276;
+        background: #18786b;
+        border-color: #25a08f;
+        color: #fff;
       }
       .mini-on {
         background: var(--amber);
@@ -385,18 +455,43 @@ import "../styles/globals.css";
         padding-right: 4px;
       }
       .wchip {
-        background: #122033;
-        border: 1px solid #233149;
-        border-radius: 10px;
-        padding: 0.45rem 0.55rem;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        padding: 0.5rem 0.6rem;
         cursor: pointer;
-        transition: border-color 0.15s;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        transition:
+          border-color 0.15s,
+          transform 0.12s ease,
+          background-color 0.15s;
       }
       .wchip:hover {
-        border-color: #3b5176;
+        border-color: var(--border-strong);
+        background: var(--surface-3);
+        transform: translateY(-1px);
+      }
+      /* 選択済み: amber の薄塗りで「選んだ」が一目で分かる */
+      .wchip.selected-ring {
+        background: rgba(245, 158, 11, 0.12);
+        border-color: var(--amber);
       }
       .wchip-urgent {
-        border-color: #7f1d1d;
+        border-color: var(--red);
+      }
+      /* 選択チェック / 緊急バッジ */
+      .w-check {
+        color: var(--amber);
+        font-weight: 900;
+      }
+      .w-urgent-badge {
+        background: var(--red);
+        color: #fff;
+        font-size: 0.58rem;
+        font-weight: 800;
+        border-radius: 4px;
+        padding: 0 0.3rem;
+        margin-left: 0.25rem;
       }
       .w-top {
         font-size: 0.8rem;
@@ -413,7 +508,7 @@ import "../styles/globals.css";
       }
       .w-meta {
         font-size: 0.68rem;
-        color: #9fb3c8;
+        color: var(--muted);
         margin: 0.15rem 0;
         font-variant-numeric: tabular-nums;
       }
@@ -458,9 +553,10 @@ import "../styles/globals.css";
       .log-row {
         display: flex;
         gap: 0.4rem;
-        padding: 0.18rem 0.35rem;
-        border-radius: 5px;
-        background: #0e1a2b;
+        padding: 0.22rem 0.4rem;
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        border-left: 3px solid var(--border-strong);
       }
       .log-time {
         color: var(--muted);
@@ -468,19 +564,19 @@ import "../styles/globals.css";
         flex-shrink: 0;
       }
       .log-settle {
-        background: #14321f;
+        border-left-color: var(--green);
       }
       .log-arrival {
-        background: #102a3a;
+        border-left-color: var(--blue);
       }
       .log-rage,
       .log-bust {
-        background: #341417;
+        border-left-color: var(--red);
       }
       .log-open,
       .log-swap,
       .log-combine {
-        background: #2a2440;
+        border-left-color: var(--amber);
       }
 
       /* ===== 共通 ===== */
@@ -501,11 +597,11 @@ import "../styles/globals.css";
         left: 50%;
         bottom: 1.5rem;
         transform: translateX(-50%) translateY(2rem);
-        background: #1e293b;
-        border: 1px solid #334155;
+        background: var(--surface-3);
+        border: 1px solid var(--border-strong);
         color: var(--ink);
         padding: 0.6rem 1.1rem;
-        border-radius: 10px;
+        border-radius: var(--r-md);
         font-size: 0.85rem;
         font-weight: 700;
         opacity: 0;
@@ -528,7 +624,7 @@ import "../styles/globals.css";
       .result-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(3, 8, 6, 0.82);
+        background: rgba(8, 14, 11, 0.78);
         display: none;
         align-items: center;
         justify-content: center;
@@ -539,9 +635,9 @@ import "../styles/globals.css";
         display: flex;
       }
       .result-card {
-        background: linear-gradient(180deg, #17243a, #0e1726);
-        border: 1px solid #2c3b57;
-        border-radius: 18px;
+        background: var(--surface-1);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-lg);
         padding: 1.5rem 1.8rem;
         text-align: center;
         max-width: 460px;
@@ -589,7 +685,7 @@ import "../styles/globals.css";
         display: flex;
         justify-content: space-between;
         font-size: 0.8rem;
-        border-bottom: 1px dashed #2a3950;
+        border-bottom: 1px dashed var(--border);
         padding: 0.2rem 0;
       }
       .result-grid span {
@@ -615,14 +711,14 @@ import "../styles/globals.css";
       .page-foot summary {
         cursor: pointer;
         font-weight: 700;
-        color: #cbd5e1;
+        color: var(--ink);
       }
       .page-foot ul {
         line-height: 1.7;
         margin: 0.5rem 0;
       }
       .credit code {
-        background: #1e293b;
+        background: var(--surface-2);
         padding: 0.1rem 0.35rem;
         border-radius: 4px;
       }
