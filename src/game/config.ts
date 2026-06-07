@@ -9,8 +9,9 @@ export const CONFIG = {
   closeMin: 1410, // 23:30 ラストオーダー（以降は新規来店なし・進行中は完走）
   hardCloseMin: 1500, // 25:00 強制閉店（残っていても締める）
   minutesPerTick: 1, // 1tickでゲーム内1分進む
-  tickMs: 420, // 1x で 1tick の実時間。720分*420ms ≒ 実5分で1日
-  maxStepsPerFrame: 240, // スパイラル防止
+  advanceTickMs: 55, // ターン制: 「次のイベントへ」自動進行アニメの1tick間隔（見やすい速さ）
+  maxStepsPerFrame: 8, // 1フレームあたりの最大tick数（停止条件まで滑らかに進める）
+  urgentRatio: 0.75, // 待ち客の「緊急」しきい値（我慢ゲージ比。停止条件＆赤表示に共用）
 
   // ---- 半荘の長さ（分）----
   eastMin: 7, // 東場（この間のみ交代可能）

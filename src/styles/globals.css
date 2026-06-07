@@ -2,30 +2,31 @@
 
 /* ===== デザイントークン ===== */
 :root {
-  /* elevation サーフェススケール（純黒をやめ、明度差で階層化） */
-  --bg-top: #1a2820; /* やわらかい深緑 */
-  --bg-bottom: #10130f;
-  --surface-1: #1e2b24; /* パネル（hud / control / log）*/
-  --surface-2: #26352c; /* カード（table-card / wchip）*/
-  --surface-3: #324036; /* 操作要素ベース・ホバー面 */
-  --border: #38493e;
-  --border-strong: #4a5f51;
+  /* ライトテーマ: 灰緑のベース＋白い面を影で持ち上げて elevation を表現 */
+  --bg-top: #e9ece9; /* 灰緑のベース */
+  --bg-bottom: #e3e7e3;
+  --surface-1: #ffffff; /* パネル（hud / control / log）= 白で持ち上げ */
+  --surface-2: #ffffff; /* カード（table-card / wchip）= 白＋影 */
+  --surface-3: #eaefec; /* 操作要素ベース・ホバー面（白より少し沈む灰）*/
+  --border: #d7ded8;
+  --border-strong: #bcc7c0;
 
-  /* 意味色（卓レート/状態）— 暗い面で少しトーンアップ */
-  --felt: #1c4a38; /* 麻雀卓のフェルト緑 */
-  --felt-dark: #14392b;
+  /* 意味色（卓レート/状態） */
+  --felt: #1c7a52; /* 麻雀卓のフェルト緑（アクセント） */
+  --felt-dark: #14633f;
   --blue: #2563eb; /* ブルー卓(点5) */
-  --blue-bright: #3b82f6; /* ボタン地用 */
+  --blue-bright: #2563eb; /* ボタン地用（白文字で十分なコントラスト）*/
   --blue-soft: #1e3a8a;
   --green: #16a34a; /* グリーン卓(点3) */
-  --green-bright: #22c55e; /* ボタン地用 */
+  --green-bright: #16a34a; /* ボタン地用 */
   --green-soft: #14532d;
   --amber: #f59e0b; /* モシラス・選択 */
-  --red: #ef4444; /* ラスハン・緊急 */
+  --amber-ink: #b45309; /* 明背景で読める濃いアンバー（文字用）*/
+  --red: #dc2626; /* ラスハン・緊急 */
 
   /* テキスト */
-  --ink: #f1f5f3; /* 純白を少し落として眩しさ軽減 */
-  --muted: #b3c2b7; /* 暗い面でも読めるよう明るめに */
+  --ink: #1f2937; /* 濃いグレー文字 */
+  --muted: #5b6b62; /* 副次テキスト（明背景で4.5:1）*/
 
   /* 半径（3段階に統一）*/
   --r-sm: 6px;
@@ -37,9 +38,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background:
-    linear-gradient(180deg, var(--bg-top) 0%, #161f19 45%, var(--bg-bottom) 100%);
-  background-attachment: fixed;
+  background: var(--bg-top);
   color: var(--ink);
   font-family:
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, -apple-system,

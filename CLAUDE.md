@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**モシラス** — a real-time 雀荘 (free mahjong parlor) management simulation game. You play the floor manager: seat customers at tables, fill empty seats by playing 本走 (staff sit-in), swap/combine tables, and maximize 売上 (revenue from 場代 game fees) from open to close. Astro 5 + Tailwind v4 static site, deployed to GitHub Pages. Live: https://satory074.github.io/moshirasu/
+**モシラス** — a **turn-based** 雀荘 (free mahjong parlor) management simulation game. You play the floor manager: seat customers at tables, fill empty seats by playing 本走 (staff sit-in), swap/combine tables, and maximize 売上 (revenue from 場代 game fees) from open to close. Time only advances when you press **「次のイベントへ」**, which fast-forwards (animated) until the next decision point and auto-stops. Astro 5 + Tailwind v4 static site (**light theme**), deployed to GitHub Pages. Live: https://satory074.github.io/moshirasu/
 
 ## Commands
 
@@ -24,7 +24,7 @@ Deploy: push to `main` → `.github/workflows/deploy.yml` builds and publishes t
 
 The entire game is a **single authoritative `GameState` object** mutated in exactly two places — the `tick()` loop and the `actions.*` command functions — with the DOM as a pure projection of that state. Everything under `src/game/` is framework-free; **only `render.ts` and `main.ts` touch the DOM**. Keep it that way: the DOM-free core is what makes the engine unit-testable in Node/tsx.
 
-Data flow per frame: `engine.ts` rAF loop → `tick(state)` advances the sim → `render(state)` projects to DOM. User clicks → `render.ts` builds a `Command` → `main.ts` dispatch → `actions.*` validates + mutates state + logs → returns `Result` → toast + re-render.
+Data flow: the player presses 「次のイベントへ」 → `engine.advance()` runs an rAF loop that calls `tick(state)` at `CONFIG.advanceTickMs` pace, re-rendering each step, and **auto-stops at the next decision point** (`detectStop`) → `render(state)` projects to DOM. Other user clicks → `render.ts` builds a `Command` → `main.ts` dispatch → `actions.*` validates + mutates state + logs → returns `Result` → toast + re-render. (There is no auto-advance; idle = no rAF.)
 
 Module map (all in `src/game/`):
 
@@ -38,16 +38,16 @@ Module map (all in `src/game/`):
 | `customers.ts` | Arrival spawning, stat rolls, wait/rage-quit, post-半荘 leave/stay decision. |
 | `tables.ts` | Table/seat logic + the 半荘 state machine, 本走/swap/combine. The biggest rules module. |
 | `actions.ts` | Player command layer. Each returns `Result`; UI mutates state *only* through here. |
-| `engine.ts` | Real-time tick loop + the deterministic per-tick orchestration order. |
+| `engine.ts` | Turn-based `advance()` (event-driven auto-stop via `detectStop`) + the deterministic per-tick orchestration order in `tick()`. |
 | `selectors.ts` | Read-only derived views for rendering (formatClock, kpis, progress ratios). |
 | `render.ts` | state→DOM. Keyed element maps + event delegation. Owns transient UI selection state. |
-| `main.ts` | Composition root: wires state→renderer→engine, handles restart and the spacebar pause. |
+| `main.ts` | Composition root: wires state→renderer→engine, handles restart and the spacebar = 「次のイベントへ」 shortcut. |
 
 ### Things that require reading multiple files to understand
 
 - **Determinism / replay**: every random draw goes through `state.rng` (seeded from `?seed=` or `Date.now()` once at boot). `?seed=12345` reproduces an entire run. Never use `Math.random()` / `Date.now()` inside game logic — only at the boot seed in `main.ts`.
 
-- **The tick loop** (`engine.ts`): rAF + fixed-timestep accumulator. `speed` (1/2/4) multiplies *consumed* time; each fixed step always advances `CONFIG.minutesPerTick` and runs identical math regardless of speed. `speed === 0` renders without simulating. The per-tick order is fixed and load-bearing: clock → close check → arrivals → wait/rage → per-table `advanceHanchan` → final close check.
+- **Turn advance** (`engine.ts`): `advance()` runs an rAF loop that ticks at `CONFIG.advanceTickMs` pace until `detectStop` fires, then sets `state.advancing=false` and halts (no rAF while idle). `detectStop` compares a pre-tick snapshot to the new state and stops on: closed / new arrival / a table newly `WAITING_TO_START` with an empty seat / a table newly `EAST` with a 本走 seat while customers wait (交代 chance) / a waiting customer newly crossing `CONFIG.urgentRatio`. It deliberately does **not** re-stop on a still-`WAITING_TO_START` table (avoids pointless repeat stops). The per-tick order in `tick()` is fixed and load-bearing: clock → close check → arrivals → wait/rage → per-table `advanceHanchan` → final close check.
 
 - **The 半荘 state machine** (`tables.ts` `advanceHanchan`): `WAITING_TO_START → EAST → SOUTH → SETTLING → DONE→loop`. Calls (ラスハン/モシラス) are rolled at the `→EAST` transition; settlement + leave-or-stay happens in the single `SETTLING` tick. **Swap (交代) is only legal during `EAST` on a table with a 本走 seat** — it's the one mid-半荘 player action.
 

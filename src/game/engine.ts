@@ -1,61 +1,113 @@
-// ===== リアルタイム tick ループ（rAF + 固定タイムステップ蓄積器）=====
+// ===== ターン制エンジン（イベント駆動の自動進行）=====
+// 自動では進まない。「次のイベントへ」(advance) で、判断が必要な
+// イベント（来店/半荘終了で空席/交代機会/待ち客の緊急化/閉店）まで
+// 一定ペース（advanceTickMs）で tick() を回し、そこで自動停止する。
+// ゲームロジックは全て tick() 駆動＝実時計を読まないので決定論・seedリプレイは不変。
 
 import { CONFIG } from "./config";
 import { maybeSpawnArrival, tickWaiting } from "./customers";
+import { patienceRatio } from "./selectors";
 import { addLog } from "./state";
 import { advanceHanchan } from "./tables";
-import type { GameState } from "./types";
+import type { GameState, HanchanStatus } from "./types";
 
 export interface Engine {
-  start(): void;
+  /** 次の判断イベントまで自動進行する。 */
+  advance(): void;
+  /** 進行中のアニメを止める（restart 用）。 */
   stop(): void;
 }
 
-/**
- * エンジンを生成。onFrame は毎フレーム（描画用）呼ばれる。
- * 時間進行は state.speed に従い、0 のときは描画のみ。
- */
+interface Snapshot {
+  waitingCount: number;
+  urgentIds: Set<number>;
+  tableStatus: Map<number, HanchanStatus>;
+}
+
+/** tick 直前の状態を記録（イベント検出のため）。 */
+function snapshot(state: GameState): Snapshot {
+  const urgentIds = new Set<number>();
+  for (const c of state.waiting) {
+    if (patienceRatio(c) > CONFIG.urgentRatio) urgentIds.add(c.id);
+  }
+  const tableStatus = new Map<number, HanchanStatus>();
+  for (const t of state.tables) tableStatus.set(t.id, t.progress.status);
+  return { waitingCount: state.waiting.length, urgentIds, tableStatus };
+}
+
+/** 直前スナップショットと現在 state を比較し、判断が必要な停止イベントが起きたか。 */
+function detectStop(prev: Snapshot, state: GameState): boolean {
+  // ① 閉店
+  if (state.phase === "CLOSED") return true;
+  // ② 新規来店
+  if (state.waiting.length > prev.waitingCount) return true;
+  // ③ 卓が新たに「開始待ち＋空席」に（半荘終了で席が空く＝案内/本走/合卓の判断）。
+  //    継続中の開始待ちでは再停止しない（無意味な連続停止の回避）。
+  for (const t of state.tables) {
+    if (t.progress.status !== "WAITING_TO_START") continue;
+    if (prev.tableStatus.get(t.id) === "WAITING_TO_START") continue;
+    if (t.seats.some((s) => s.occupant.kind === "EMPTY")) return true;
+  }
+  // ④ 卓が新たに東場入り＋本走席あり＋待ち客あり（交代の機会）。
+  if (state.waiting.length > 0) {
+    for (const t of state.tables) {
+      if (t.progress.status !== "EAST") continue;
+      if (prev.tableStatus.get(t.id) === "EAST") continue;
+      if (t.seats.some((s) => s.occupant.kind === "STAFF")) return true;
+    }
+  }
+  // ⑤ 待ち客が新たに緊急化（離脱前の最後の案内チャンス）。
+  for (const c of state.waiting) {
+    if (!prev.urgentIds.has(c.id) && patienceRatio(c) > CONFIG.urgentRatio) return true;
+  }
+  return false;
+}
+
 export function createEngine(state: GameState, onFrame: (state: GameState) => void): Engine {
   let rafId = 0;
-  let running = false;
   let last = 0;
   let acc = 0;
 
   const loop = (now: number) => {
-    if (!running) return;
+    if (!state.advancing) return;
     const dt = last === 0 ? 0 : now - last;
     last = now;
+    acc += dt;
 
-    if (state.speed !== 0 && state.phase !== "CLOSED") {
-      acc += dt * state.speed;
-      let steps = 0;
-      while (acc >= CONFIG.tickMs && steps < CONFIG.maxStepsPerFrame) {
-        tick(state);
-        acc -= CONFIG.tickMs;
-        steps++;
-        if ((state.phase as string) === "CLOSED") break;
+    let stop = false;
+    let steps = 0;
+    while (acc >= CONFIG.advanceTickMs && steps < CONFIG.maxStepsPerFrame) {
+      const prev = snapshot(state);
+      tick(state);
+      acc -= CONFIG.advanceTickMs;
+      steps++;
+      if (detectStop(prev, state)) {
+        stop = true;
+        break;
       }
     }
 
     onFrame(state);
 
-    if (state.phase === "CLOSED") {
-      running = false;
+    if (stop || state.phase === "CLOSED") {
+      state.advancing = false;
+      onFrame(state); // ボタンの disabled 解除を反映
       return;
     }
     rafId = requestAnimationFrame(loop);
   };
 
   return {
-    start() {
-      if (running) return;
-      running = true;
+    advance() {
+      if (state.advancing || state.phase === "CLOSED") return;
+      state.advancing = true;
       last = 0;
       acc = 0;
+      onFrame(state); // ボタンを「進行中…」disabled に
       rafId = requestAnimationFrame(loop);
     },
     stop() {
-      running = false;
+      state.advancing = false;
       if (rafId) cancelAnimationFrame(rafId);
     },
   };

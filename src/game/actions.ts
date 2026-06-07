@@ -15,7 +15,7 @@ import {
   seatInto,
   tableNo,
 } from "./tables";
-import type { Customer, GameState, Occupant, Rate, Result, Speed } from "./types";
+import type { Customer, GameState, Occupant, Rate, Result } from "./types";
 
 /** 待ち客IDから客を引く。 */
 function getWaiting(state: GameState, id: number): Customer | undefined {
@@ -164,21 +164,6 @@ export function combineAction(state: GameState, tableIdA: number, tableIdB: numb
     addLog(state, "INFO", `卓#${no} はあと${4 - occupiedCount(result)}人。案内/本走で埋めてください`);
   }
   return { ok: true };
-}
-
-/** 速度変更。 */
-export function setSpeedAction(state: GameState, speed: Speed): void {
-  state.speed = speed;
-  if (speed !== 0) state.lastSpeed = speed;
-}
-
-/** 一時停止トグル。 */
-export function togglePauseAction(state: GameState): void {
-  if (state.speed === 0) state.speed = state.lastSpeed;
-  else {
-    state.lastSpeed = state.speed;
-    state.speed = 0;
-  }
 }
 
 // ---- ヘルパー ----

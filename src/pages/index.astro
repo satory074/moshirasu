@@ -76,6 +76,7 @@ import "../styles/globals.css";
         border: 1px solid var(--border);
         border-radius: var(--r-lg);
         padding: 0.7rem 1rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
       }
       .clock-wrap,
       .rev-wrap {
@@ -96,13 +97,13 @@ import "../styles/globals.css";
       .rev {
         font-size: 1.5rem;
         font-weight: 800;
-        color: #fde68a;
+        color: var(--amber-ink);
         font-variant-numeric: tabular-nums;
       }
       .day-track,
       .rep-track {
         height: 6px;
-        background: rgba(0, 0, 0, 0.25);
+        background: rgba(0, 0, 0, 0.08);
         border-radius: 4px;
         overflow: hidden;
         margin-top: 0.35rem;
@@ -146,24 +147,22 @@ import "../styles/globals.css";
         font-size: 0.95rem;
         font-variant-numeric: tabular-nums;
       }
-      .speed-btns {
+      /* ターン制: 「次のイベントへ」主ボタン */
+      .advance-wrap {
         display: flex;
-        gap: 0.35rem;
         justify-content: flex-end;
       }
-      .spd {
-        background: var(--surface-3);
-        color: var(--ink);
-        border: 1px solid var(--border-strong);
-        border-radius: var(--r-sm);
-        padding: 0.3rem 0.65rem;
-        font-size: 0.78rem;
-        font-weight: 700;
-      }
-      .spd-on {
-        background: var(--amber);
-        color: #1a1206;
-        border-color: var(--amber);
+      .btn-advance {
+        width: 100%;
+        background: var(--blue-bright);
+        color: #fff;
+        border: none;
+        border-radius: var(--r-md);
+        padding: 0.55rem 1rem;
+        font-size: 0.9rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
       }
 
       /* ===== メイン3カラム ===== */
@@ -199,6 +198,7 @@ import "../styles/globals.css";
         border-radius: var(--r-md);
         padding: 0.7rem 0.8rem;
         margin-bottom: 0.6rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
       }
       .ctl-title {
         font-weight: 800;
@@ -262,7 +262,8 @@ import "../styles/globals.css";
       }
       .step-sel {
         font-size: 0.74rem;
-        color: #fcd34d;
+        color: var(--amber-ink);
+        font-weight: 700;
         margin-top: 0.15rem;
         min-height: 1.05em;
       }
@@ -287,7 +288,7 @@ import "../styles/globals.css";
         font-weight: 800;
         font-size: 0.84rem;
         color: white;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
       }
       .btn-blue {
         background: var(--blue-bright);
@@ -308,7 +309,7 @@ import "../styles/globals.css";
         border-left: 3px solid var(--border-strong);
         border-radius: var(--r-md);
         padding: 0.6rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
       }
       .tc-blue {
         border-left-color: var(--blue);
@@ -329,7 +330,7 @@ import "../styles/globals.css";
       }
       .tc-status {
         margin-left: auto;
-        color: #fcd34d;
+        color: var(--amber-ink);
         font-weight: 700;
       }
       .tc-count {
@@ -337,7 +338,7 @@ import "../styles/globals.css";
       }
       .track {
         height: 5px;
-        background: rgba(0, 0, 0, 0.4);
+        background: rgba(0, 0, 0, 0.08);
         border-radius: 3px;
         overflow: hidden;
         margin-bottom: 0.5rem;
@@ -351,7 +352,7 @@ import "../styles/globals.css";
         gap: 0.35rem;
       }
       .seat {
-        background: rgba(0, 0, 0, 0.18);
+        background: rgba(0, 0, 0, 0.04);
         border: 1px solid var(--border);
         border-radius: var(--r-sm);
         padding: 0.35rem 0.4rem;
@@ -384,8 +385,8 @@ import "../styles/globals.css";
         font-variant-numeric: tabular-nums;
       }
       .seat-staff {
-        border-color: #6d4aa0;
-        background: rgba(76, 47, 122, 0.35);
+        border-color: #a78bfa;
+        background: rgba(124, 58, 237, 0.1);
       }
       .seat-badge {
         align-self: flex-start;
@@ -427,7 +428,7 @@ import "../styles/globals.css";
         padding: 0.32rem 0.7rem;
         font-size: 0.75rem;
         font-weight: 700;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
       }
       .mini-staff {
         background: #5d3a96;
@@ -460,7 +461,7 @@ import "../styles/globals.css";
         border-radius: var(--r-md);
         padding: 0.5rem 0.6rem;
         cursor: pointer;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
         transition:
           border-color 0.15s,
           transform 0.12s ease,
@@ -650,19 +651,19 @@ import "../styles/globals.css";
         line-height: 1;
       }
       .rank-S {
-        color: #fbbf24;
+        color: #d97706;
       }
       .rank-A {
-        color: #34d399;
+        color: #059669;
       }
       .rank-B {
-        color: #60a5fa;
+        color: #2563eb;
       }
       .rank-C {
-        color: #cbd5e1;
+        color: #6b7280;
       }
       .rank-D {
-        color: #f87171;
+        color: #dc2626;
       }
       .result-title {
         font-size: 1.1rem;
@@ -692,7 +693,7 @@ import "../styles/globals.css";
         color: var(--muted);
       }
       .result-grid b.bad {
-        color: #f87171;
+        color: var(--red);
       }
       .result-restart {
         width: 100%;

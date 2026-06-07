@@ -5,9 +5,7 @@ import {
   honsoAction,
   openTableAction,
   seatCustomerAction,
-  setSpeedAction,
   swapAction,
-  togglePauseAction,
 } from "./actions";
 import { createEngine, type Engine } from "./engine";
 import { createRenderer, type Command } from "./render";
@@ -43,11 +41,8 @@ export function boot(): void {
         return toRes(swapAction(state, cmd.customerId, cmd.tableId));
       case "combine":
         return toRes(combineAction(state, cmd.a, cmd.b));
-      case "setSpeed":
-        setSpeedAction(state, cmd.speed);
-        return { ok: true };
-      case "togglePause":
-        togglePauseAction(state);
+      case "advance":
+        engine.advance();
         return { ok: true };
       case "restart":
         restart();
@@ -65,8 +60,7 @@ export function boot(): void {
     state = createInitialState(seed);
     renderer.reset();
     engine = createEngine(state, renderer.render);
-    engine.start();
-    renderer.render(state);
+    renderer.render(state); // 自動進行はしない。最初の描画のみ。
   }
 
   function restart() {
@@ -74,12 +68,11 @@ export function boot(): void {
     startNew(newSeed());
   }
 
-  // キーボード: スペースで一時停止トグル
+  // キーボード: スペースで「次のイベントへ」
   window.addEventListener("keydown", (e) => {
     if (e.code === "Space") {
       e.preventDefault();
-      dispatch({ type: "togglePause" });
-      renderer.render(state);
+      dispatch({ type: "advance" });
     }
   });
 

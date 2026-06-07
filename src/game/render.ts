@@ -15,7 +15,7 @@ import {
   patienceRatio,
   yen,
 } from "./selectors";
-import type { GameState, Rate, Seat, Speed, Table } from "./types";
+import type { GameState, Rate, Seat, Table } from "./types";
 
 /** UIから発行されるコマンド。 */
 export type Command =
@@ -24,8 +24,7 @@ export type Command =
   | { type: "honso"; tableId: number }
   | { type: "swap"; customerId: number; tableId: number }
   | { type: "combine"; a: number; b: number }
-  | { type: "setSpeed"; speed: Speed }
-  | { type: "togglePause" }
+  | { type: "advance" }
   | { type: "restart" };
 
 export type Dispatch = (cmd: Command) => { ok: boolean; reason?: string };
@@ -57,7 +56,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     kpiWaiting: must("#kpi-waiting"),
     kpiServed: must("#kpi-served"),
     kpiAvgwait: must("#kpi-avgwait"),
-    speedBtns: must("#speed-btns"),
+    advanceWrap: must("#advance-wrap"),
     control: must("#control"),
     tables: must("#tables"),
     waiting: must("#waiting"),
@@ -115,11 +114,8 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         }
         rerender();
         break;
-      case "speed":
-        fire({ type: "setSpeed", speed: Number(target.dataset.speed) as Speed });
-        break;
-      case "pause":
-        fire({ type: "togglePause" });
+      case "advance":
+        fire({ type: "advance" });
         break;
       case "restart":
         fire({ type: "restart" });
@@ -202,7 +198,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     el.kpiAvgwait.textContent = `${k.avgWait.toFixed(0)}分`;
     el.waitingCount.textContent = String(state.waiting.length);
 
-    renderSpeed(state);
+    renderAdvance(state);
     renderControl(state);
     renderTables(state);
     renderWaiting(state);
@@ -210,17 +206,13 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     renderResult(state);
   }
 
-  function renderSpeed(state: GameState) {
-    const speeds: Speed[] = [1, 2, 4];
-    const paused = state.speed === 0;
-    el.speedBtns.innerHTML =
-      `<button data-action="pause" class="spd ${paused ? "spd-on" : ""}">${paused ? "▶ 再開" : "⏸ 停止"}</button>` +
-      speeds
-        .map(
-          (s) =>
-            `<button data-action="speed" data-speed="${s}" class="spd ${state.speed === s ? "spd-on" : ""}">${s}x</button>`,
-        )
-        .join("");
+  function renderAdvance(state: GameState) {
+    const closed = isClosed(state);
+    const busy = state.advancing;
+    const label = busy ? "⏳ 進行中…" : "▶ 次のイベントへ";
+    el.advanceWrap.innerHTML = closed
+      ? ""
+      : `<button data-action="advance" class="btn-advance" ${busy ? "disabled" : ""}>${label}</button>`;
   }
 
   function renderControl(state: GameState) {
@@ -511,7 +503,7 @@ const SHELL = `
       <div class="kpi"><span>接客</span><b id="kpi-served">0</b></div>
       <div class="kpi"><span>平均待ち</span><b id="kpi-avgwait">0分</b></div>
     </div>
-    <div id="speed-btns" class="speed-btns"></div>
+    <div id="advance-wrap" class="advance-wrap"></div>
   </div>
 </div>
 

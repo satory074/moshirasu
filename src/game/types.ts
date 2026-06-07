@@ -18,9 +18,6 @@ export type CustomerStatus = "WAITING" | "SEATED" | "LEFT";
 /** 営業フェーズ。 */
 export type Phase = "OPEN" | "CLOSING" | "CLOSED";
 
-/** ゲーム速度。0=一時停止。 */
-export type Speed = 0 | 1 | 2 | 4;
-
 /** 半荘の進行状態。 */
 export type HanchanStatus =
   | "WAITING_TO_START" // 席が埋まるのを待っている
@@ -158,10 +155,8 @@ export interface GameState {
   /** その日の経過分（開店=720 など）。 */
   clockMin: number;
   phase: Phase;
-  /** 0=一時停止。 */
-  speed: Speed;
-  /** 再開用に最後の非0速度を保持。 */
-  lastSpeed: 1 | 2 | 4;
+  /** ターン制: 「次のイベントへ」自動進行アニメ中なら true（UIボタン抑止用）。 */
+  advancing: boolean;
   tables: Table[];
   /** 待ち客（到着順）。 */
   waiting: Customer[];
