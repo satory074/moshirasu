@@ -61,6 +61,7 @@ export function spawnCustomer(state: GameState): Customer {
     status: "WAITING",
     arrivedAtMin: state.clockMin,
     feePaid: 0,
+    hanchansPlayed: 0,
   };
   state.customers.set(customer.id, customer);
   state.waiting.push(customer);
@@ -134,6 +135,8 @@ export function decideLeaveOrStay(
   if (minsLeft <= CONFIG.callLasthanBias.nearLeaveByMin) p += 0.25;
   const ratio = customer.bankroll / Math.max(1, customer.startBankroll);
   if (ratio <= CONFIG.callLasthanBias.lowBankrollRatio) p += 0.2;
+  // 最低3半荘打つつもり: まだ3半荘に満たない客は自主離席しにくい（ソフト保証）。
+  if (customer.hanchansPlayed < CONFIG.minHanchanIntent) p *= CONFIG.under3LeaveMult;
   if (state.rng.chance(p)) return { leaves: true, reason: "MOSHIRASU" };
   return { leaves: false, reason: null };
 }

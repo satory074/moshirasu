@@ -52,6 +52,8 @@ export interface Customer {
   arrivedAtMin: number;
   /** この客が払った場代の累計（円）。 */
   feePaid: number;
+  /** これまで打ち終えた半荘数（最低3半荘の判定に使用）。 */
+  hanchansPlayed: number;
 }
 
 /** 本走に入れる店員。 */

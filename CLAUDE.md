@@ -63,3 +63,6 @@ Module map (all in `src/game/`):
 - **Base path**: production serves under `/moshirasu`. Astro handles asset URLs; the dev URL is `/moshirasu/`. `astro.config.mjs` sets `base: "/moshirasu"`.
 - **Tailwind v4 + Astro type mismatch**: the Vite plugin is cast `any` in `astro.config.mjs` (`/** @type {any} */ (tailwindcss())`).
 - **`scripts/*.ts` need `tsx` + `jsdom`** (devDependencies). `domtest.ts` injects DOM globals *before* dynamically importing `render.ts`.
+- **客は最低3半荘打つつもり（ソフト保証）**: `Customer.hanchansPlayed` を `settleTable` で数え、`config.ts` の `minHanchanIntent`(3) 未満なら `decideLeaveOrStay`(customers.ts) と `rollCalls`(tables.ts) で自主離席/ラスハン確率を `under3LeaveMult`/`under3LasthanMult`(0.15) で抑制。飛び・時間切れ・閉店は従来通り強制離席。
+- **進行ボタンは2箇所に描画**: `renderAdvance` は同じ「次のイベントへ」ボタンを HUD内 `#advance-wrap`（PC）と画面下部固定の `#advance-bar`（スマホ）の両方に注入し、CSS `@media (max-width:960px)` でどちらか一方だけ表示する。片方だけ直すとレイアウトがずれる。
+- **モバイルのログ折りたたみはJSなし**: `#log-toggle` チェックボックス＋label の CSS 兄弟セレクタ（`@media (max-width:960px)`）で開閉。エンジンは従来通り `#log` に描画するだけ。

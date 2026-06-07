@@ -57,6 +57,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     kpiServed: must("#kpi-served"),
     kpiAvgwait: must("#kpi-avgwait"),
     advanceWrap: must("#advance-wrap"),
+    advanceBar: must("#advance-bar"),
     control: must("#control"),
     tables: must("#tables"),
     waiting: must("#waiting"),
@@ -210,9 +211,13 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const closed = isClosed(state);
     const busy = state.advancing;
     const label = busy ? "⏳ 進行中…" : "▶ 次のイベントへ";
-    el.advanceWrap.innerHTML = closed
+    // 同じボタンを HUD内（PC）と画面下部固定バー（スマホ）の両方に出す。
+    // CSS のブレークポイントでどちらか一方だけ表示する。
+    const btn = closed
       ? ""
       : `<button data-action="advance" class="btn-advance" ${busy ? "disabled" : ""}>${label}</button>`;
+    el.advanceWrap.innerHTML = btn;
+    el.advanceBar.innerHTML = btn;
   }
 
   function renderControl(state: GameState) {
@@ -239,8 +244,8 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         <div class="step-body">
           <div class="step-label">卓のレートを選ぶ</div>
           <div class="ctl-btns">
-            <button data-action="open-table" data-rate="BLUE" class="btn btn-blue" ${n === 0 ? "disabled" : ""}>🔵 ブルー卓(点5)で立てる</button>
-            <button data-action="open-table" data-rate="GREEN" class="btn btn-green" ${n === 0 ? "disabled" : ""}>🟢 グリーン卓(点3)で立てる</button>
+            <button data-action="open-table" data-rate="BLUE" class="btn btn-blue" ${n === 0 ? `disabled title="先に待ち客を選択してください"` : ""}>🔵 ブルー卓(点5)で立てる</button>
+            <button data-action="open-table" data-rate="GREEN" class="btn btn-green" ${n === 0 ? `disabled title="先に待ち客を選択してください"` : ""}>🟢 グリーン卓(点3)で立てる</button>
           </div>
         </div>
       </div>
@@ -310,23 +315,32 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const hasHonsoSeat = t.seats.some((s) => s.occupant.kind === "STAFF");
     const custCount = t.seats.filter((s) => s.occupant.kind === "CUSTOMER").length;
     const freeStaff = state.staff.some((s) => !s.busy);
+    const canSwap = playing && hasHonsoSeat && t.progress.status === "EAST";
     const btns: string[] = [];
     if (waitingStart && hasEmpty) {
-      btns.push(`<button data-action="seat" data-id="${t.id}" class="mini">案内</button>`);
+      btns.push(`<button data-action="seat" data-id="${t.id}" class="mini">👉 案内</button>`);
       if (custCount >= 1 && freeStaff)
-        btns.push(`<button data-action="honso" data-id="${t.id}" class="mini mini-staff">本走</button>`);
+        btns.push(`<button data-action="honso" data-id="${t.id}" class="mini mini-staff">🧑‍💼 本走</button>`);
     }
-    if (playing && hasHonsoSeat && t.progress.status === "EAST") {
-      btns.push(`<button data-action="swap" data-id="${t.id}" class="mini mini-swap">交代</button>`);
+    if (canSwap) {
+      btns.push(`<button data-action="swap" data-id="${t.id}" class="mini mini-swap mini-attention">🔁 交代</button>`);
     }
     if (waitingStart) {
       const picked = ui.combineFirst === t.id;
       btns.push(
-        `<button data-action="combine-pick" data-id="${t.id}" class="mini ${picked ? "mini-on" : ""}">${picked ? "合卓:選択中" : "合卓"}</button>`,
+        `<button data-action="combine-pick" data-id="${t.id}" class="mini ${picked ? "mini-on" : ""}">🔗 ${picked ? "合卓:選択中" : "合卓"}</button>`,
       );
     }
 
-    tbody.innerHTML = `<div class="seats">${seatsHtml}</div><div class="tc-actions">${btns.join("")}</div>`;
+    // 「今この卓で何ができるか」を一言で示す（発見性・時間限定アクションの明示）
+    let hint = "";
+    if (waitingStart && hasEmpty) {
+      hint = `<div class="tc-hint">💡 空席あり — 待ち客を「案内」、または「本走」で店員を入れて開始</div>`;
+    } else if (canSwap) {
+      hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ「交代」で待ち客を入れられます</div>`;
+    }
+
+    tbody.innerHTML = `<div class="seats">${seatsHtml}</div>${hint}<div class="tc-actions">${btns.join("")}</div>`;
   }
 
   function seatHtml(state: GameState, s: Seat, guide = false): string {
@@ -342,7 +356,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const c = state.customers.get(s.occupant.customerId);
     if (!c) return `<div class="seat seat-empty">空席</div>`;
     const call = s.call
-      ? `<span class="call ${s.call === "LASTHAN" ? "call-last" : "call-mosh"}">${s.call === "LASTHAN" ? "ラスハン" : "モシラス"}</span>`
+      ? `<span class="call ${s.call === "LASTHAN" ? "call-last" : "call-mosh"}" title="${s.call === "LASTHAN" ? "ラスハン（この半荘で最後）" : "モシラス（続けるかも）"}">${s.call === "LASTHAN" ? "L" : "M"}</span>`
       : "";
     const low = c.bankroll <= c.startBankroll * 0.3 ? "seat-low" : "";
     return `<div class="seat seat-cust ${low}">
@@ -518,10 +532,13 @@ const SHELL = `
     <div id="waiting" class="waiting thin-scroll"></div>
   </section>
   <section class="col col-log">
-    <h2 class="col-h">イベントログ</h2>
+    <input type="checkbox" id="log-toggle" class="log-toggle-cb" />
+    <label for="log-toggle" class="col-h log-toggle">イベントログ <span class="log-caret">▾</span></label>
     <div id="log" class="log thin-scroll"></div>
   </section>
 </div>
+
+<div id="advance-bar" class="advance-bar"></div>
 
 <div id="toast" class="toast"></div>
 <div id="result" class="result-overlay"></div>

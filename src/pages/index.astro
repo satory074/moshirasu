@@ -399,12 +399,17 @@ import "../styles/globals.css";
       .seat-low {
         border-color: #7f1d1d;
       }
+      /* コールバッジ: 1文字（L=ラスハン / M=モシラス）の丸バッジ */
       .call {
         align-self: flex-start;
-        font-size: 0.6rem;
-        font-weight: 800;
-        border-radius: 4px;
-        padding: 0 0.3rem;
+        min-width: 1.15rem;
+        height: 1.15rem;
+        line-height: 1.15rem;
+        text-align: center;
+        font-size: 0.72rem;
+        font-weight: 900;
+        border-radius: 999px;
+        padding: 0;
       }
       .call-last {
         background: var(--red);
@@ -444,6 +449,46 @@ import "../styles/globals.css";
         background: var(--amber);
         color: #1a1206;
         border-color: var(--amber);
+      }
+      /* 時間限定アクション（交代=東場のみ）を目立たせる淡いパルス */
+      @keyframes mini-attention {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgba(24, 120, 107, 0.3);
+        }
+      }
+      .mini-attention {
+        animation: mini-attention 1.4s ease-in-out infinite;
+      }
+      /* 卓カードの状態ヒント（今この卓で何ができるか） */
+      .tc-hint {
+        margin-top: 0.45rem;
+        font-size: 0.68rem;
+        line-height: 1.35;
+        color: var(--muted);
+        background: var(--surface-1);
+        border: 1px dashed var(--border-strong);
+        border-radius: var(--r-sm);
+        padding: 0.3rem 0.4rem;
+      }
+      .tc-hint-time {
+        color: var(--amber-ink);
+        border-color: rgba(245, 158, 11, 0.5);
+        background: rgba(245, 158, 11, 0.08);
+      }
+
+      /* ===== 下部固定 進行バー（既定PCでは非表示・スマホで表示）===== */
+      .advance-bar {
+        display: none;
+      }
+
+      /* ===== ログ折りたたみ（既定PCでは常時展開）===== */
+      .log-toggle-cb,
+      .log-caret {
+        display: none;
       }
 
       /* ===== 待ち客 ===== */
@@ -724,7 +769,7 @@ import "../styles/globals.css";
         border-radius: 4px;
       }
 
-      /* ===== レスポンシブ ===== */
+      /* ===== レスポンシブ（スマホ）===== */
       @media (max-width: 960px) {
         .main {
           grid-template-columns: 1fr;
@@ -732,6 +777,74 @@ import "../styles/globals.css";
         .hud {
           grid-template-columns: 1fr;
           gap: 0.5rem;
+        }
+        .clock {
+          font-size: 1.4rem;
+        }
+        /* 進行ボタンは HUD から下部固定バーへ移す（親指リーチ）。 */
+        .hud .advance-wrap {
+          display: none;
+        }
+        .advance-bar {
+          display: block;
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 40;
+          padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+          background: var(--surface-1);
+          border-top: 1px solid var(--border-strong);
+          box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.12);
+        }
+        .advance-bar .btn-advance {
+          min-height: 48px;
+          font-size: 1rem;
+        }
+        /* 下部バーに最終要素が隠れないよう余白を確保。 */
+        .app {
+          padding-bottom: 5rem;
+        }
+
+        /* ログをタップで開閉（既定は折りたたみ）。 */
+        .log-toggle {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          cursor: pointer;
+          min-height: 44px;
+          margin: 0;
+          padding: 0.4rem 0.2rem;
+        }
+        .log-caret {
+          display: inline-block;
+          transition: transform 0.15s;
+        }
+        .log-toggle-cb:checked ~ .log-toggle .log-caret {
+          transform: rotate(180deg);
+        }
+        .log-toggle-cb:not(:checked) ~ #log {
+          display: none;
+        }
+        #log {
+          max-height: 40vh;
+        }
+
+        /* タップ領域の拡大（min 44px・間隔 >=10px）。 */
+        .mini {
+          min-height: 44px;
+          padding: 0.55rem 0.9rem;
+          font-size: 0.85rem;
+        }
+        .tc-actions {
+          gap: 0.5rem;
+        }
+        .wchip {
+          padding: 0.7rem 0.75rem;
+          min-height: 48px;
+        }
+        .btn {
+          min-height: 44px;
         }
       }
     </style>

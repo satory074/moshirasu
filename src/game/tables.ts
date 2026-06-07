@@ -107,6 +107,13 @@ export function rollCalls(state: GameState): (table: Table) => void {
       const ratio = c.bankroll / Math.max(1, c.startBankroll);
       if (ratio <= CONFIG.callLasthanBias.lowBankrollRatio)
         pLasthan += CONFIG.callLasthanBias.lowBankrollBoost;
+      // 最低3半荘打つつもり: 次半荘が物理的に入るのに3半荘未満なら、
+      // ラスハンコールを大きく抑える（=モシラス濃厚）。時間切れ濃厚(0.95)はそのまま。
+      if (
+        c.hanchansPlayed < CONFIG.minHanchanIntent &&
+        minsLeft > CONFIG.eastMin + CONFIG.southMin
+      )
+        pLasthan *= CONFIG.under3LasthanMult;
       seat.call = state.rng.chance(pLasthan) ? "LASTHAN" : "MOSHIRASU";
     }
   };
@@ -192,6 +199,8 @@ function settleTable(state: GameState, table: Table): void {
     const { busted } = applyBankroll(c, s.yen);
     // ツキを軽くドリフト（平均回帰）。
     c.luck = clampLuck(c.luck + state.rng.gaussian(0, CONFIG.luck.driftSd));
+    // この半荘を打ち終えた。最低3半荘の判定はこのカウントに基づく。
+    c.hanchansPlayed++;
 
     // 去就判定
     const decision = decideLeaveOrStay(state, c, seat, busted);

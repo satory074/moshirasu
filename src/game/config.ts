@@ -75,6 +75,12 @@ export const CONFIG = {
   // ラスハンに寄せるバイアス（帰宅間近・資金薄）。
   callLasthanBias: { nearLeaveByMin: 30, nearLeaveByBoost: 0.45, lowBankrollRatio: 0.3, lowBankrollBoost: 0.35 },
   baseLasthanProb: 0.18, // 平常時にラスハンする確率
+  // 客は最低3半荘打つつもりで来店する（ソフト保証）。3半荘未満では
+  // 自主離席・ラスハンコールの確率を大きく抑える（稀に早く帰るのは許容）。
+  // 飛び・帰宅時刻（時間切れ）による離席は別経路で従来通り強制される。
+  minHanchanIntent: 3, // 客が打つつもりの最低半荘数
+  under3LeaveMult: 0.15, // 3半荘未満のモシラス自主離席 確率倍率
+  under3LasthanMult: 0.15, // 3半荘未満のラスハンコール 確率倍率
   // 交代受諾。点棒リード・親で受諾↑、帰宅間近で受諾↓。
   swap: { base: 0.5, kPoints: 0.000012, dealerBonus: 0.15, kLateMin: 0.006 },
 
