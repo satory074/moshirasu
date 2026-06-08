@@ -22,6 +22,8 @@ Run a single test directly: `npx tsx scripts/smoketest.ts` (pure engine: zero-su
 
 Deploy: push to `main` → `.github/workflows/deploy.yml` builds and publishes to Pages. No manual step.
 
+Shared ranking (optional): copy `.env.example` → `.env` and set `PUBLIC_SUPABASE_URL`/`PUBLIC_SUPABASE_ANON_KEY` (else ranking stays local-only via localStorage). The same vars go in the repo's Actions **Secrets** for production. No keys configured = builds/tests/dev still work.
+
 ## Architecture
 
 The entire game is a **single authoritative `GameState` object** mutated in exactly two places — the `tick()` loop and the `actions.*` command functions — with the DOM as a pure projection of that state. Everything under `src/game/` is framework-free; **only `render.ts` and `main.ts` touch the DOM**. Keep it that way: the DOM-free core is what makes the engine unit-testable in Node/tsx.
@@ -43,8 +45,8 @@ Module map (all in `src/game/`):
 | `engine.ts` | Turn-based `advance()` (event-driven auto-stop via `detectStop`) + the deterministic per-tick orchestration order in `tick()`. |
 | `ranking.ts` | Score persistence. `RankingStore` interface (async) with `LocalRankingStore` (localStorage/memory, DI'd storage) + `SupabaseRankingStore` (plain `fetch` to PostgREST, no SDK). `createRankingStore()` picks Supabase if `PUBLIC_SUPABASE_*` env is set, else local. `buildScoreEntry`/`percentile`. DOM-free. |
 | `selectors.ts` | Read-only derived views for rendering (formatClock, `kpis` incl. `profit`/`wages`, `kyokuLabel`, progress ratios). |
-| `render.ts` | state→DOM. Keyed element maps + event delegation. Owns transient UI selection state. |
-| `main.ts` | Composition root: wires state→renderer→engine, handles restart and the spacebar = 「次のイベントへ」 shortcut. |
+| `render.ts` | state→DOM. Keyed element maps + event delegation. Owns transient UI state outside `GameState`: 待ち客 selection, the `#setup` staff-count stepper, and the result-screen ranking view (`createRankingStore`). |
+| `main.ts` | Composition root: wires state→renderer→engine. Boot shows the setup screen (not auto-start); `startGame(staffCount)` begins play; `restart` returns to setup. Spacebar = 「次のイベントへ」. |
 
 ### Things that require reading multiple files to understand
 
@@ -76,6 +78,6 @@ Module map (all in `src/game/`):
 - **局シミュ定数は `CONFIG.kyoku` に集約**: `kyokuMin`/`ryuukyokuProb`/`tsumoProb`/`winSkillW`/`winLuckW`/`dealerWinMult`/`handValues`/`blueHandMult`/`maxKyokuPerHanchan`/`maxHonba`/`seatedWaitMult`。半荘長・飛び頻度・1日の半荘数（=売上）はここで決まる。`handValues`/`blueHandMult` を上げると点5の飛びが増えるが反動でブレも増える。スコア評価は `scoreRank(利益)`＝`targetProfit` 基準（旧 `targetRevenue` は参考値）。
 - **店員IDは固定域・客/卓IDは1000+**: `createInitialState` の店員は `id:0,1,…`（`nextId` の1000+域と衝突しない）。`staffName(idx)` は4人を超えると `メンバー N` にフォールバック（設定で最大 `maxTables*4`=48人まで選べるが破綻しない）。
 
-- **ランキングは外部書き込み先が要る**: 共有ランキングは GitHub Pages 単体では不可（静的配信＝書き込み不可）。`PUBLIC_SUPABASE_URL`/`PUBLIC_SUPABASE_ANON_KEY`（Astro は `PUBLIC_` プレフィックス必須、`NEXT_PUBLIC_` ではない）を `.env`/Actions Secrets に設定すると Supabase 共有、未設定ならローカル（localStorage）に自動フォールバック。Supabase 側は `scores` テーブル＋RLS（SELECT/INSERT のみ・`WITH CHECK` で値制約）。`@supabase/supabase-js` は入れず素の `fetch` で PostgREST を叩く（依存ゼロ）。anon key は RLS 前提で公開可、**service_role key は置かない**。詳細SQLは承認済みプラン参照。
+- **ランキングは外部書き込み先が要る**: 共有ランキングは GitHub Pages 単体では不可（静的配信＝書き込み不可）。`PUBLIC_SUPABASE_URL`/`PUBLIC_SUPABASE_ANON_KEY`（Astro は `PUBLIC_` プレフィックス必須、`NEXT_PUBLIC_` ではない）を `.env`/Actions Secrets に設定すると Supabase 共有、未設定ならローカル（localStorage）に自動フォールバック。Supabase 側は `scores` テーブル＋RLS（SELECT/INSERT のみ・`WITH CHECK` で値制約）。`@supabase/supabase-js` は入れず素の `fetch` で PostgREST を叩く（依存ゼロ）。anon key は RLS 前提で公開可、**service_role key は置かない**。env の雛形は `.env.example`。`scores` の列は `id/name/profit/rank/staff_count/served/hanchan/seed/at_iso`（`ScoreEntry` の snake_case 版、`ranking.ts` の `toRow`/`fromRow` で変換）。`WITH CHECK` は名前長・利益上下限・staff範囲・rank列挙を検証。
 - **卓グリッドは `auto-fill minmax(240px,1fr)`**: `maxTables:12` でも `#tables` のCSSはそのまま流れる（`index.astro` の `<style is:global>`）。`卓 N/12` 表記は `CONFIG.maxTables` 参照で自動追従。
 - **合卓はレート違いでもOK・レート変更も可**: `canCombine` は構造条件（半荘前・客合計1〜4）だけを見て、レート整合は `combineAction` が判定する。両卓の客の希望を両立できるレート（`combineRate`）へ集約し、点5希望と点3希望が混在する場合のみ拒否。`changeRateAction`/`canChangeRate` は「半荘前・客が全員ANY(どちらでも)」の卓のレートを点5⇄点3で切替（混在卓では不可）。どちらも `Customer.pref` を尊重するのが不変条件。
