@@ -236,6 +236,31 @@ console.log("[dom] ランキング登録 OK");
   assert(ps.tables.length === tablesBefore - 1, "空になった元卓が撤去された");
   console.log("[dom] 別卓→移動＋元卓撤去 OK");
 
+  // 客起点の移動: 席埋め中の客本人をクリック→移動先卓ピッカーから別卓を選んで移動
+  const mvSrc = spawnCustomer(ps);
+  mvSrc.pref = "ANY";
+  openTableAction(ps, "GREEN", [mvSrc.id]);
+  const srcTable = ps.tables[ps.tables.length - 1];
+  const mvDestCust = spawnCustomer(ps);
+  mvDestCust.pref = "ANY";
+  openTableAction(ps, "GREEN", [mvDestCust.id]);
+  const destTable = ps.tables[ps.tables.length - 1];
+  const srcCount = ps.tables.length;
+  r2.render(ps);
+  const moveSeat = root2.querySelector(`.seat-move[data-id="${mvSrc.id}"]`) as unknown as HTMLElement;
+  assert(!!moveSeat, "席埋め中の客に pick-move 属性がある");
+  click(moveSeat);
+  assert(!!root2.querySelector("#picker .pk-panel"), "客クリックで移動先ピッカーが開いた");
+  const destBtn = root2.querySelector(
+    `[data-action="choose"][data-kind="moveDest"][data-table="${destTable.id}"]`,
+  ) as unknown as HTMLElement;
+  assert(!!destBtn, "希望一致の別卓が移動先候補に出る");
+  click(destBtn);
+  assert(mvSrc.seatRef?.tableId === destTable.id, "mvSrc が destTable へ移動した");
+  assert(ps.tables.length === srcCount - 1, "空になった元卓が撤去された");
+  void srcTable;
+  console.log("[dom] 客クリック→別卓へ移動 OK");
+
   // 交代: 満席（本走あり）の卓を作り、断った客は swap ピッカーに出ないことを確認
   const f = spawnCustomer(ps);
   f.pref = "ANY";

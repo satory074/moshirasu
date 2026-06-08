@@ -12,7 +12,7 @@ import {
   type RankingStore,
   type ScoreEntry,
 } from "./ranking";
-import { canChangeRate } from "./tables";
+import { canChangeRate, firstEmptyIdx, hasEmptySeat } from "./tables";
 import {
   dayProgress,
   formatClock,
@@ -44,8 +44,12 @@ export type Dispatch = (cmd: Command) => { ok: boolean; reason?: string };
 interface UiState {
   selected: number[]; // 選択中の待ち客ID（順序つき）
   combineFirst: number | null; // 合卓の1卓目
-  // 席クリックで開くアテンド/交代ピッカーの対象席。null なら閉じている。
-  pickSeat: { tableId: number; seatIdx: number; mode: "seat" | "swap" } | null;
+  // 席クリックで開くアテンド/交代/移動ピッカーの対象。null なら閉じている。
+  // seat/swap は対象「席」起点、move は移動させる「客」起点（移動先卓をピッカーで選ぶ）。
+  pickSeat:
+    | { mode: "seat" | "swap"; tableId: number; seatIdx: number }
+    | { mode: "move"; customerId: number }
+    | null;
 }
 
 /** 開店前設定（ゲーム状態とは独立した transient UI 状態）。 */
@@ -156,6 +160,10 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         ui.pickSeat = { tableId: id, seatIdx: Number(target.dataset.seat ?? "0"), mode: "swap" };
         rerender();
         break;
+      case "pick-move":
+        ui.pickSeat = { mode: "move", customerId: id };
+        rerender();
+        break;
       case "pick-close":
         ui.pickSeat = null;
         rerender();
@@ -165,7 +173,17 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         if (!ps) break;
         const kind = target.dataset.kind;
         ui.pickSeat = null;
-        if (kind === "cust") {
+        if (ps.mode === "move") {
+          // 客起点の移動: 移動先卓/席は候補行の data 属性から読む。
+          if (kind === "moveDest") {
+            fire({
+              type: "move",
+              customerId: ps.customerId,
+              tableId: Number(target.dataset.table ?? "0"),
+              seatIdx: Number(target.dataset.seat ?? "0"),
+            });
+          }
+        } else if (kind === "cust") {
           fire({ type: "seat", customerId: id, tableId: ps.tableId, seatIdx: ps.seatIdx });
         } else if (kind === "staff") {
           fire({ type: "honso", tableId: ps.tableId, seatIdx: ps.seatIdx, staffId: id });
@@ -345,6 +363,11 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   /** 空席/本走席クリックで開くアテンド・交代ピッカー。候補をクリックして実行。 */
   function renderPicker(state: GameState) {
     const ps = ui.pickSeat;
+    // 客起点の移動ピッカー（移動させる客は固定、移動先卓を選ぶ）。
+    if (ps?.mode === "move") {
+      renderMovePicker(state, ps.customerId);
+      return;
+    }
     // 対象席が無効になっていたら閉じる。
     let valid = false;
     let table: Table | undefined;
@@ -422,6 +445,49 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       </div>`;
   }
 
+  /** 客起点の移動ピッカー。移動させる客は固定で、希望一致・開始待ち・空席ありの別卓を移動先候補に並べる。 */
+  function renderMovePicker(state: GameState, customerId: number) {
+    const c = state.customers.get(customerId);
+    const src = c?.seatRef ? state.tables.find((t) => t.id === c.seatRef!.tableId) : undefined;
+    // 移動元の客・卓が無効化（離席/開始済み等）していたら閉じる。
+    if (!c || c.status !== "SEATED" || !src || src.progress.status !== "WAITING_TO_START") {
+      ui.pickSeat = null;
+      pickerEl?.remove();
+      pickerEl = null;
+      return;
+    }
+
+    if (!pickerEl) {
+      pickerEl = document.createElement("div");
+      pickerEl.id = "picker";
+      root.appendChild(pickerEl);
+    }
+
+    const rows: string[] = [];
+    for (const t of state.tables) {
+      if (t.id === src.id || t.progress.status !== "WAITING_TO_START") continue;
+      if (!hasEmptySeat(t) || !prefAllowsRate(c.pref, t.rate)) continue;
+      const no = state.tables.indexOf(t) + 1;
+      const rateStr = t.rate === "BLUE" ? "点5(ブルー)" : "点3(グリーン)";
+      const empties = t.seats.filter((s) => s.occupant.kind === "EMPTY").length;
+      rows.push(destRow(t.id, firstEmptyIdx(t), `卓#${no}`, prefBadgeHtml(c.pref), `${rateStr}・空席${empties}`));
+    }
+
+    const body =
+      rows.length > 0
+        ? `<div class="pk-list">${rows.join("")}</div>`
+        : `<div class="pk-empty">移動できる別卓がありません</div>`;
+    pickerEl.innerHTML = `
+      <div class="pk-backdrop" data-action="pick-close"></div>
+      <div class="pk-panel" role="dialog">
+        <div class="pk-head">
+          <span class="pk-title">${c.emoji} ${c.name} の移動先を選択</span>
+          <button class="pk-close" data-action="pick-close" aria-label="閉じる">✕</button>
+        </div>
+        ${body}
+      </div>`;
+  }
+
   function candidateRow(
     kind: "cust" | "staff" | "move" | "swap",
     id: number,
@@ -430,6 +496,14 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     meta: string,
   ): string {
     return `<button class="pk-row" data-action="choose" data-kind="${kind}" data-id="${id}">
+      <span class="pk-name">${name} ${badge}</span>
+      <span class="pk-meta">${meta}</span>
+    </button>`;
+  }
+
+  /** 移動先卓を表す候補行。移動先の卓ID/席Idxを data 属性に持つ。 */
+  function destRow(tableId: number, seatIdx: number, name: string, badge: string, meta: string): string {
+    return `<button class="pk-row" data-action="choose" data-kind="moveDest" data-table="${tableId}" data-seat="${seatIdx}">
       <span class="pk-name">${name} ${badge}</span>
       <span class="pk-meta">${meta}</span>
     </button>`;
@@ -627,12 +701,18 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       const pr = patienceRatio(c);
       waitLine = `<div class="seat-wait ${pr > 0.75 ? "seat-wait-urgent" : ""}">開始待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</div>`;
     }
-    return `<div class="seat seat-cust ${low}">
+    // 開始待ち（席埋め中）の客はクリックで別卓へ移動できる。対局中はクリック不可。
+    const moveAttr = waitingStart
+      ? ` seat-move" data-action="pick-move" data-id="${c.id}"`
+      : `"`;
+    const moveHint = waitingStart ? `<div class="seat-swaphint">↪️ クリックで移動</div>` : "";
+    return `<div class="seat seat-cust ${low}${moveAttr}>
       <div class="seat-name">${c.emoji} ${c.name}${dealer} ${prefBadge}</div>
       <div class="seat-meta">${yen(c.bankroll)}</div>
       ${pts}
       ${waitLine}
       ${call}
+      ${moveHint}
     </div>`;
   }
 
