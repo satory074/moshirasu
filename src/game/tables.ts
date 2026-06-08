@@ -291,31 +291,43 @@ function resolveKyoku(state: GameState, table: Table): { renchan: boolean; buste
   const winner = weightedIndex(rng, weights);
   const winnerIsDealer = winner === dealer;
 
-  // 手の点数（点）。ヘビーテール。点5卓は手が大きく振れる（飛びのリスク）。
+  // 手の点数（子のロン基準点）。ヘビーテール。点5卓は手が大きく振れる（飛びのリスク）。
   let handPts = Math.round(rng.weighted<number>(k.handValues));
   if (table.rate === "BLUE") handPts = Math.round(handPts * k.blueHandMult);
   const tsumo = rng.chance(k.tsumoProb);
+  const honba = table.progress.honba;
+  // 実麻雀の支払いに寄せ、各支払いを100点単位に丸める（勝者は丸め後の合計をそのまま得るので
+  // ゼロサムは厳守。Σ点棒≡100000）。
+  const r100 = (x: number) => Math.round(x / 100) * 100;
 
+  let collected = 0;
   if (tsumo) {
-    // ツモ: 全員から徴収（親なら均等、子なら親が多め）。勝者は徴収合計を得る。
-    let collected = 0;
+    // ツモ: 全員から徴収。本場は1人につき+100×本場。
     table.seats.forEach((s, i) => {
       if (i === winner) return;
       let pay: number;
-      if (winnerIsDealer) pay = Math.round(handPts / 3);
-      else pay = i === dealer ? Math.round(handPts / 2) : Math.round(handPts / 4);
+      if (winnerIsDealer) {
+        // 親ツモ: 3人が均等に handPts×1.5/3（=子基準の半額オール）。
+        pay = r100((handPts * 1.5) / 3);
+      } else {
+        // 子ツモ: 親=handPts/2, 子=handPts/4（子-子-親 = x-x-2x）。
+        pay = i === dealer ? r100(handPts / 2) : r100(handPts / 4);
+      }
+      pay += 100 * honba;
       s.points -= pay;
       collected += pay;
     });
-    table.seats[winner].points += collected;
   } else {
-    // ロン: 放銃者抽選（敗者の中から、低skillほど振り込みやすい）。
+    // ロン: 放銃者抽選（敗者の中から、低skillほど振り込みやすい）。本場は+300×本場。
     const losers = [0, 1, 2, 3].filter((i) => i !== winner);
     const lw = losers.map((i) => Math.exp(-k.winSkillW * statsOf(state, table.seats[i]).skill));
     const discarder = losers[weightedIndex(rng, lw)];
-    table.seats[discarder].points -= handPts;
-    table.seats[winner].points += handPts;
+    // 親のロンは1.5倍（親満貫12000など）。
+    const pay = (winnerIsDealer ? r100(handPts * 1.5) : r100(handPts)) + 300 * honba;
+    table.seats[discarder].points -= pay;
+    collected = pay;
   }
+  table.seats[winner].points += collected;
 
   return { renchan: winnerIsDealer, busted: hasMinus(table) };
 }

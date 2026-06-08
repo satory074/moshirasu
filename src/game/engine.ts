@@ -53,7 +53,7 @@ interface Snapshot {
 }
 
 /** tick 直前の状態を記録（イベント検出のため）。 */
-function snapshot(state: GameState): Snapshot {
+export function snapshot(state: GameState): Snapshot {
   const urgentIds = new Set<number>();
   // 待ち列の客 + 開始待ちで着席中の客、どちらも緊急化を検出する。
   for (const c of state.waiting) {
@@ -73,7 +73,7 @@ function snapshot(state: GameState): Snapshot {
 }
 
 /** 直前スナップショットと現在 state を比較し、判断が必要な停止イベントが起きたか。 */
-function detectStop(prev: Snapshot, state: GameState): boolean {
+export function detectStop(prev: Snapshot, state: GameState): boolean {
   // ① 閉店
   if (state.phase === "CLOSED") return true;
   // ② 新規来店

@@ -3,7 +3,7 @@
 import { CONFIG } from "../src/game/config";
 import { settleHanchan } from "../src/game/economy";
 import { createInitialState } from "../src/game/state";
-import { tick } from "../src/game/engine";
+import { tick, snapshot, detectStop } from "../src/game/engine";
 import {
   changeRateAction,
   combineAction,
@@ -143,7 +143,8 @@ function autoPlayBlue(seed: number): GameState {
     rev += s.revenue.total;
   }
   console.log(`[blue-aggressive] 5日 総飛=${busts} 平均売上=¥${Math.round(rev / 5).toLocaleString()}（点5一辺倒）`);
-  if (busts === 0) console.log("⚠️  点5一辺倒でも飛びが0。資金尽きの体験が薄いかも。");
+  // 高レート(点5)の核＝資金が尽きて飛ぶ体験。点5一辺倒なら数日に1回は飛ぶこと。
+  if (busts === 0) throw new Error("点5一辺倒でも飛びが0: 高レートの怖さが死んでいる（blueHandMult/rate/bankroll を見直す）");
 }
 
 let totalRev = 0;
@@ -171,6 +172,32 @@ console.log(
 );
 if (totalRev <= 0) throw new Error("no revenue generated");
 if (hanchan <= 0) throw new Error("no hanchan played");
+
+// ---- 2c) セッション長: 1プレイの「決定停止回数」が ~5分相当の帯に収まるか ----
+// ターン制なので実時間 ≈ Σ(人間の判断時間)。停止(detectStop)回数がそのまま手数＝体感時間。
+// 最適寄りAIで平均~72回(seed毎 57〜88)。速い判断なら~4分、じっくりでも~6分に収まる想定。
+// 営業時間/来店レートを変えるとここがズレるので、~5分の目安帯(45〜100回)を回帰ガードする。
+{
+  let totalStops = 0;
+  const seeds = [1, 2, 3, 12345, 777, 999, 42, 2024, 55, 8];
+  for (const seed of seeds) {
+    const state = createInitialState(seed);
+    let stops = 0;
+    let guard = 0;
+    while (state.phase !== "CLOSED" && guard < 100000) {
+      guard++;
+      autoManage(state); // プレイヤーの手（最適寄り）を毎tick反映
+      const prev = snapshot(state);
+      tick(state);
+      if (detectStop(prev, state)) stops++;
+    }
+    totalStops += stops;
+  }
+  const avgStops = totalStops / seeds.length;
+  console.log(`[session] 10seed平均 決定停止回数=${avgStops.toFixed(1)}（~5分の目安帯: 45〜100）`);
+  if (avgStops < 45 || avgStops > 100)
+    throw new Error(`セッション長が目安帯を外れた: 平均停止${avgStops.toFixed(1)}（営業時間/来店レートを見直す）`);
+}
 
 // ---- 3) 開店前設定の店員数が反映され、人件費が店員数にスケールする ----
 {
@@ -239,8 +266,8 @@ if (hanchan <= 0) throw new Error("no hanchan played");
   if (checks === 0) throw new Error("no in-play point-sum checks ran");
 }
 
-// ---- 5) 卓数上限が12 ----
-if (CONFIG.maxTables !== 12) throw new Error(`maxTables expected 12, got ${CONFIG.maxTables}`);
+// ---- 5) 卓数上限（5分プレイ向けに 8 卓へ縮小）----
+if (CONFIG.maxTables !== 8) throw new Error(`maxTables expected 8, got ${CONFIG.maxTables}`);
 console.log(`[tables] maxTables=${CONFIG.maxTables}`);
 
 // ---- 6) レート違いの合卓: 希望が両立すれば集約できる ----

@@ -5,12 +5,14 @@ import type { Rate } from "./types";
 
 export const CONFIG = {
   // ---- 時計（その日の分。12:00=720, 24:00=1440）----
-  openMin: 720, // 12:00 開店
+  // 1プレイ ~5分を狙い「夜の繁忙シフト」に短縮。既存 arrivalCurveByHour の
+  // ピーク(17-22時=0.6-1.0)をそのまま活かすため 17:00 開店にしてある。
+  openMin: 1020, // 17:00 開店（夜シフト・~7.5h営業）
   closeMin: 1410, // 23:30 ラストオーダー（以降は新規来店なし・進行中は完走）
-  hardCloseMin: 1500, // 25:00 強制閉店（残っていても締める）
+  hardCloseMin: 1470, // 24:30 強制閉店（残っていても締める）
   minutesPerTick: 1, // 1tickでゲーム内1分進む
-  advanceTickMs: 55, // ターン制: 「次のイベントへ」自動進行アニメの1tick間隔（見やすい速さ）
-  maxStepsPerFrame: 8, // 1フレームあたりの最大tick数（停止条件まで滑らかに進める）
+  advanceTickMs: 35, // ターン制: 「次のイベントへ」自動進行アニメの1tick間隔（読める範囲で高速）
+  maxStepsPerFrame: 10, // 1フレームあたりの最大tick数（停止条件まで滑らかに進める）
   urgentRatio: 0.75, // 待ち客の「緊急」しきい値（我慢ゲージ比。停止条件＆赤表示に共用）
 
   // ---- 半荘の長さ（分）----
@@ -48,11 +50,13 @@ export const CONFIG = {
     seatedWaitMult: 0.5,
     // 点5(BLUE)は赤・祝儀の世界で手が大きく振れる。点5卓の手の点数を増幅し、
     // 薄い資金の客が飛ぶ「高レートの怖さ」を演出する（点3=GREENは等倍）。
-    blueHandMult: 1.5,
+    blueHandMult: 1.8,
   },
 
   // ---- 卓数 ----
-  maxTables: 12,
+  // 5分で捌ける規模に抑える（レバーB）。CONFIG.maxTables 参照箇所・CSS・staffName
+  // フォールバック(maxTables*4)は自動追従する。
+  maxTables: 8,
 
   // ---- 来店 ----
   // 時間帯別の相対重み（昼ピーク・夜ピーク）。キーは「時」。
@@ -70,18 +74,20 @@ export const CONFIG = {
     22: 0.7,
     23: 0.4,
   } as Record<number, number>,
-  baseArrivalChancePerTick: 0.13, // 1tickあたりの来店確率の基準値
+  baseArrivalChancePerTick: 0.085, // 1tickあたりの来店確率の基準値（来店総数↓→決定停止↓・1客の重み↑）
   reputationArrivalFactor: 0.6, // 評判が低いと来店を抑制する強さ（0で無影響）
-  maxWaitingSpawn: 16, // 待ち列がこれ以上なら来店抑制（卓数12に合わせ少し広げる）
+  maxWaitingSpawn: 10, // 待ち列がこれ以上なら来店抑制（山積みを抑え来店連発を減らす）
 
   // ---- 希望分布 ----
   prefWeights: { BLUE: 0.25, GREEN: 0.35, ANY: 0.4 } as Record<string, number>,
 
   // ---- 経済 ----
   // 場代（客1人・1半荘あたり）= プレイヤーの実売上。点5の方を高く設定。
-  gameFeeYen: { BLUE: 600, GREEN: 350 } as Record<Rate, number>,
-  // レート（1000点あたりの円）。点5=¥50, 点3=¥30。
-  rateYenPer1000: { BLUE: 50, GREEN: 30 } as Record<Rate, number>,
+  // 客数を絞った（レバーB）ぶん1客の単価を上げ、利益水準を維持する（少数・高単価）。
+  gameFeeYen: { BLUE: 820, GREEN: 480 } as Record<Rate, number>,
+  // レート（1000点あたりの円）。点5=¥100, 点3=¥30。
+  // 点5を高くして資金変動を大きくし、薄い資金の客が大敗で飛ぶ「高レートの怖さ」を成立させる。
+  rateYenPer1000: { BLUE: 100, GREEN: 30 } as Record<Rate, number>,
   oka: { mochi: 25000, kaeshi: 30000 }, // 25000持ち30000返し → 1位に+20000
   uma: [20, 10, -10, -20] as number[], // ウマ（×1000点）
   // 点棒スプレッドのテンプレ範囲（×1000点）。ゼロサムに正規化される。
@@ -96,7 +102,7 @@ export const CONFIG = {
   // ---- 客のステータス分布 ----
   skill: { mean: 0.5, sd: 0.18 },
   luck: { mean: 0.5, sd: 0.15, driftSd: 0.05 },
-  bankrollYen: { mean: 45000, sd: 18000, min: 12000 },
+  bankrollYen: { mean: 30000, sd: 14000, min: 9000 }, // 薄い財布も混ざり、点5で飛びうる
   patienceMin: { mean: 28, sd: 9, min: 8 },
   sessionLenMin: { mean: 170, sd: 55, min: 60 }, // leaveByMin = arrival + これ
 
@@ -145,11 +151,13 @@ export const CONFIG = {
   staffCount: 2, // 開店前設定の初期値（デフォルト店員数）
   staffMin: 1, // 設定で選べる最小店員数（最大は maxTables*4 を使用箇所で導出＝全席を本走で埋められる上限）
   wagePerHourYen: 1200, // 店員1人あたりの時給（人件費）。多いほど利益を圧迫。
-  targetProfit: 90000, // スコア評価の基準（利益＝売上−人件費）
+  // ~7.5h営業の最適寄りプレイで利益 ~¥50k（飛び/怒りで上下に大きく振れる）。
+  // B(=0.9×)を「及第点」中央に置き、A/Sが上振れ、C/Dが下振れになるよう設定。
+  targetProfit: 50000, // スコア評価の基準（利益＝売上−人件費）
 
   // ---- その他 ----
   logCap: 120,
-  targetRevenue: 120000, // 旧基準（参考値）
+  targetRevenue: 70000, // 旧基準（参考値・~7.5h営業の目安売上）
 
   // 客が来店時に既存卓へ案内されるのを待つ猶予など、将来の拡張用フック。
 } as const;
