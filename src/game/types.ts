@@ -54,6 +54,10 @@ export interface Customer {
   feePaid: number;
   /** これまで打ち終えた半荘数（最低3半荘の判定に使用）。 */
   hanchansPlayed: number;
+  /** 交代で悪い位置をどこまで許容するかの性格 0..1（高いほど受諾寄り）。 */
+  swapTol: number;
+  /** 交代を一度断った卓ID。同一卓へは再オファーしない。 */
+  refusedTables: number[];
 }
 
 /** 本走に入れる店員。 */

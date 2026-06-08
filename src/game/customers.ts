@@ -45,6 +45,7 @@ export function spawnCustomer(state: GameState): Customer {
     CONFIG.sessionLenMin.min,
     Math.round(rng.gaussian(CONFIG.sessionLenMin.mean, CONFIG.sessionLenMin.sd)),
   );
+  const swapTol = clamp01(rng.gaussian(CONFIG.swapTol.mean, CONFIG.swapTol.sd));
 
   const customer: Customer = {
     id: nextId(state),
@@ -62,6 +63,8 @@ export function spawnCustomer(state: GameState): Customer {
     arrivedAtMin: state.clockMin,
     feePaid: 0,
     hanchansPlayed: 0,
+    swapTol,
+    refusedTables: [],
   };
   state.customers.set(customer.id, customer);
   state.waiting.push(customer);

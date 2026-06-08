@@ -439,28 +439,51 @@ export function canSwapHonso(table: Table): boolean {
 }
 
 /**
- * 客が本走席と交代を試みる。点棒リード・親で受諾↑、帰宅間近で受諾↓。
- * 成功なら客を着席・店員を解放して true。
+ * 客が本走席と交代を試みる。受諾は客ごとの条件で多要素判定:
+ * - 自分（=継ぐ席）の点棒状況
+ * - トップとの差
+ * - 親が残っているか（継ぐ席が現在の親か／半荘の残り＝親番がまだ回るか）
+ * - 拒否した場合の待ち時間（待つほど妥協して受諾↑）
+ * - 客ごとの許容度 swapTol
+ * 成功なら客を着席・店員を解放。拒否時はその卓を refusedTables に記録（再オファー禁止）。
+ * seatIdx を渡すとその本走席を対象に、未指定なら最初の本走席を対象にする。
  */
 export function attemptSwap(
   state: GameState,
   table: Table,
   customer: Customer,
+  seatIdx?: number,
 ): { ok: boolean; accepted: boolean } {
   if (!canSwapHonso(table)) return { ok: false, accepted: false };
-  const idx = table.seats.findIndex((s) => s.occupant.kind === "STAFF");
+  const idx =
+    seatIdx !== undefined && table.seats[seatIdx]?.occupant.kind === "STAFF"
+      ? seatIdx
+      : table.seats.findIndex((s) => s.occupant.kind === "STAFF");
   if (idx < 0) return { ok: false, accepted: false };
   const seat = table.seats[idx];
 
-  // 受諾確率
-  let p: number = CONFIG.swap.base;
-  p += (seat.points - CONFIG.oka.mochi) * CONFIG.swap.kPoints; // 点棒リードで上昇
-  if (seat.isDealer) p += CONFIG.swap.dealerBonus; // 親番は美味しい
-  const minsLeft = customer.leaveByMin - state.clockMin;
-  p -= Math.max(0, (60 - minsLeft)) * CONFIG.swap.kLateMin; // 帰宅間近だと渋る
-  p = Math.max(0.05, Math.min(0.95, p));
+  // 受諾確率（多要素）
+  const sw = CONFIG.swap;
+  const topPoints = Math.max(...table.seats.map((s) => s.points));
+  const gap = Math.max(0, topPoints - seat.points); // トップとの差
+  const remain =
+    1 - Math.min(1, table.progress.resolvedKyoku / CONFIG.kyoku.maxKyokuPerHanchan); // 親番の残り
+  const waitRatio = Math.max(0, Math.min(1, customer.waitedMin / customer.patienceMin));
+
+  let p: number = sw.base;
+  p += (seat.points - CONFIG.oka.mochi) * sw.kPoints; // 自分の点棒状況
+  p -= gap * sw.kTopGap; // トップとの差
+  if (seat.isDealer) p += sw.dealerBonus; // 親残存（現在親席）
+  p += remain * sw.kRemain; // 親番がまだ回る
+  p += waitRatio * sw.kWait; // 拒否した場合の待ち時間
+  p += (customer.swapTol - 0.5) * sw.kTol; // 客ごとの条件
+  p = Math.max(sw.pMin, Math.min(sw.pMax, p));
 
   if (!state.rng.chance(p)) {
+    // 一度断った卓には再度交代を出せない（同一卓への再オファー禁止）。
+    if (!customer.refusedTables.includes(table.id)) {
+      customer.refusedTables.push(table.id);
+    }
     return { ok: true, accepted: false };
   }
 

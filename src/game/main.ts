@@ -4,6 +4,7 @@ import {
   changeRateAction,
   combineAction,
   honsoAction,
+  moveCustomerAction,
   openTableAction,
   seatCustomerAction,
   swapAction,
@@ -35,11 +36,13 @@ export function boot(): void {
       case "openTable":
         return toRes(openTableAction(state, cmd.rate, cmd.customerIds));
       case "seat":
-        return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId));
+        return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
       case "honso":
-        return toRes(honsoAction(state, cmd.tableId));
+        return toRes(honsoAction(state, cmd.tableId, cmd.seatIdx, cmd.staffId));
       case "swap":
-        return toRes(swapAction(state, cmd.customerId, cmd.tableId));
+        return toRes(swapAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
+      case "move":
+        return toRes(moveCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
       case "combine":
         return toRes(combineAction(state, cmd.a, cmd.b));
       case "changeRate":

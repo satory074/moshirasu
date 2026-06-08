@@ -29,9 +29,10 @@ import type { GameState, Pref, Rate, Seat, Table } from "./types";
 /** UIから発行されるコマンド。 */
 export type Command =
   | { type: "openTable"; rate: Rate; customerIds: number[] }
-  | { type: "seat"; customerId: number; tableId: number }
-  | { type: "honso"; tableId: number }
-  | { type: "swap"; customerId: number; tableId: number }
+  | { type: "seat"; customerId: number; tableId: number; seatIdx: number }
+  | { type: "honso"; tableId: number; seatIdx: number; staffId: number }
+  | { type: "swap"; customerId: number; tableId: number; seatIdx: number }
+  | { type: "move"; customerId: number; tableId: number; seatIdx: number }
   | { type: "combine"; a: number; b: number }
   | { type: "changeRate"; tableId: number }
   | { type: "startGame"; staffCount: number }
@@ -43,6 +44,8 @@ export type Dispatch = (cmd: Command) => { ok: boolean; reason?: string };
 interface UiState {
   selected: number[]; // 選択中の待ち客ID（順序つき）
   combineFirst: number | null; // 合卓の1卓目
+  // 席クリックで開くアテンド/交代ピッカーの対象席。null なら閉じている。
+  pickSeat: { tableId: number; seatIdx: number; mode: "seat" | "swap" } | null;
 }
 
 /** 開店前設定（ゲーム状態とは独立した transient UI 状態）。 */
@@ -60,7 +63,7 @@ interface RankingView {
 }
 
 export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
-  const ui: UiState = { selected: [], combineFirst: null };
+  const ui: UiState = { selected: [], combineFirst: null, pickSeat: null };
   const setupState: SetupState = { staffCount: CONFIG.staffCount };
   const rankingStore: RankingStore = createRankingStore();
   const rankingView: RankingView = {
@@ -77,6 +80,8 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   const tableCards = new Map<number, HTMLElement>();
   const waitChips = new Map<number, HTMLElement>();
   const logRows = new Map<number, HTMLElement>();
+  // アテンド/交代ピッカーのオーバーレイ（必要時に root 配下へ生成）。
+  let pickerEl: HTMLElement | null = null;
 
   // ---- 一度だけ構築する骨格 ----
   root.innerHTML = SHELL;
@@ -143,17 +148,34 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         fire({ type: "openTable", rate, customerIds: [...ui.selected] });
         break;
       }
-      case "seat":
-        if (ui.selected.length === 0) return toast("案内する待ち客を選んでください", false);
-        fire({ type: "seat", customerId: ui.selected[0], tableId: id });
+      case "pick-seat":
+        ui.pickSeat = { tableId: id, seatIdx: Number(target.dataset.seat ?? "0"), mode: "seat" };
+        rerender();
         break;
-      case "honso":
-        fire({ type: "honso", tableId: id });
+      case "pick-swap":
+        ui.pickSeat = { tableId: id, seatIdx: Number(target.dataset.seat ?? "0"), mode: "swap" };
+        rerender();
         break;
-      case "swap":
-        if (ui.selected.length === 0) return toast("交代させる待ち客を選んでください", false);
-        fire({ type: "swap", customerId: ui.selected[0], tableId: id });
+      case "pick-close":
+        ui.pickSeat = null;
+        rerender();
         break;
+      case "choose": {
+        const ps = ui.pickSeat;
+        if (!ps) break;
+        const kind = target.dataset.kind;
+        ui.pickSeat = null;
+        if (kind === "cust") {
+          fire({ type: "seat", customerId: id, tableId: ps.tableId, seatIdx: ps.seatIdx });
+        } else if (kind === "staff") {
+          fire({ type: "honso", tableId: ps.tableId, seatIdx: ps.seatIdx, staffId: id });
+        } else if (kind === "move") {
+          fire({ type: "move", customerId: id, tableId: ps.tableId, seatIdx: ps.seatIdx });
+        } else if (kind === "swap") {
+          fire({ type: "swap", customerId: id, tableId: ps.tableId, seatIdx: ps.seatIdx });
+        }
+        break;
+      }
       case "combine-pick":
         if (ui.combineFirst === null) {
           ui.combineFirst = id;
@@ -223,6 +245,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   function reset() {
     ui.selected = [];
     ui.combineFirst = null;
+    ui.pickSeat = null;
+    pickerEl?.remove();
+    pickerEl = null;
     for (const [, node] of tableCards) node.remove();
     for (const [, node] of waitChips) node.remove();
     for (const [, node] of logRows) node.remove();
@@ -314,6 +339,100 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     renderWaiting(state);
     renderLog(state);
     renderResult(state);
+    renderPicker(state);
+  }
+
+  /** 空席/本走席クリックで開くアテンド・交代ピッカー。候補をクリックして実行。 */
+  function renderPicker(state: GameState) {
+    const ps = ui.pickSeat;
+    // 対象席が無効になっていたら閉じる。
+    let valid = false;
+    let table: Table | undefined;
+    if (ps) {
+      table = state.tables.find((t) => t.id === ps.tableId);
+      const seat = table?.seats[ps.seatIdx];
+      if (table && seat && table.progress.status !== "SETTLING") {
+        if (ps.mode === "seat") valid = seat.occupant.kind === "EMPTY";
+        else valid = seat.occupant.kind === "STAFF";
+      }
+    }
+    if (!ps || !valid || !table) {
+      ui.pickSeat = null;
+      pickerEl?.remove();
+      pickerEl = null;
+      return;
+    }
+
+    if (!pickerEl) {
+      pickerEl = document.createElement("div");
+      pickerEl.id = "picker";
+      root.appendChild(pickerEl);
+    }
+
+    const rateLabelStr = table.rate === "BLUE" ? "点5(ブルー)" : "点3(グリーン)";
+    const rows: string[] = [];
+
+    if (ps.mode === "seat") {
+      // 1) 待ち客（希望一致）
+      for (const c of state.waiting) {
+        if (!prefAllowsRate(c.pref, table.rate)) continue;
+        rows.push(candidateRow("cust", c.id, `${c.emoji} ${c.name}`, prefBadgeHtml(c.pref), `待ち客・資金${yen(c.bankroll)}`));
+      }
+      // 2) 空き店員
+      for (const st of state.staff) {
+        if (st.busy) continue;
+        rows.push(candidateRow("staff", st.id, `🧑‍💼 ${st.name}`, `<span class="pk-badge pk-staff">本走</span>`, "店員（場代なし）"));
+      }
+      // 3) 別卓（開始待ち）の着席客で希望一致 → 移動
+      for (const t2 of state.tables) {
+        if (t2.id === table.id || t2.progress.status !== "WAITING_TO_START") continue;
+        const no2 = state.tables.indexOf(t2) + 1;
+        for (const seat of t2.seats) {
+          if (seat.occupant.kind !== "CUSTOMER") continue;
+          const c = state.customers.get(seat.occupant.customerId);
+          if (!c || !prefAllowsRate(c.pref, table.rate)) continue;
+          rows.push(candidateRow("move", c.id, `${c.emoji} ${c.name}`, prefBadgeHtml(c.pref), `卓#${no2} から移動`));
+        }
+      }
+    } else {
+      // swap: 待ち客（希望一致・この卓を断っていない）
+      for (const c of state.waiting) {
+        if (!prefAllowsRate(c.pref, table.rate)) continue;
+        if (c.refusedTables.includes(table.id)) continue;
+        rows.push(candidateRow("swap", c.id, `${c.emoji} ${c.name}`, prefBadgeHtml(c.pref), `待ち客・資金${yen(c.bankroll)}`));
+      }
+    }
+
+    const title =
+      ps.mode === "seat"
+        ? `空席に案内（${rateLabelStr}）`
+        : `本走と交代（${rateLabelStr}・受諾は確率）`;
+    const body =
+      rows.length > 0
+        ? `<div class="pk-list">${rows.join("")}</div>`
+        : `<div class="pk-empty">該当する客・店員がいません</div>`;
+    pickerEl.innerHTML = `
+      <div class="pk-backdrop" data-action="pick-close"></div>
+      <div class="pk-panel" role="dialog">
+        <div class="pk-head">
+          <span class="pk-title">${title}</span>
+          <button class="pk-close" data-action="pick-close" aria-label="閉じる">✕</button>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  function candidateRow(
+    kind: "cust" | "staff" | "move" | "swap",
+    id: number,
+    name: string,
+    badge: string,
+    meta: string,
+  ): string {
+    return `<button class="pk-row" data-action="choose" data-kind="${kind}" data-id="${id}">
+      <span class="pk-name">${name} ${badge}</span>
+      <span class="pk-meta">${meta}</span>
+    </button>`;
   }
 
   function renderStaff(state: GameState) {
@@ -431,24 +550,14 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     // アクション判定
     const hasEmpty = t.seats.some((s) => s.occupant.kind === "EMPTY");
     const hasHonsoSeat = t.seats.some((s) => s.occupant.kind === "STAFF");
-    const custCount = t.seats.filter((s) => s.occupant.kind === "CUSTOMER").length;
-    const freeStaff = state.staff.some((s) => !s.busy);
-    // 交代: 東場、または「まもなく開始（満席・本走あり）」で可能。
+    // 交代: 東場、または「まもなく開始（満席・本走あり）」で可能。本走席クリックで起動。
     const canSwap = hasHonsoSeat && (t.progress.status === "EAST" || (waitingStart && !hasEmpty));
 
-    // 待ち客を選択中かつ開始待ちの卓なら、空席に「ここに案内」ヒントを出す
-    const seatGuide = waitingStart && ui.selected.length > 0;
-    const seatsHtml = t.seats.map((s) => seatHtml(state, s, seatGuide, waitingStart)).join("");
+    const seatsHtml = t.seats
+      .map((s, i) => seatHtml(state, t, s, i, waitingStart, canSwap))
+      .join("");
 
     const btns: string[] = [];
-    if (waitingStart && hasEmpty) {
-      btns.push(`<button data-action="seat" data-id="${t.id}" class="mini">👉 案内</button>`);
-      if (custCount >= 1 && freeStaff)
-        btns.push(`<button data-action="honso" data-id="${t.id}" class="mini mini-staff">🧑‍💼 本走</button>`);
-    }
-    if (canSwap) {
-      btns.push(`<button data-action="swap" data-id="${t.id}" class="mini mini-swap mini-attention">🔁 交代</button>`);
-    }
     if (waitingStart) {
       const picked = ui.combineFirst === t.id;
       btns.push(
@@ -464,30 +573,44 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     // 「今この卓で何ができるか」を一言で示す（発見性・時間限定アクションの明示）
     let hint = "";
     if (waitingStart && hasEmpty) {
-      hint = `<div class="tc-hint">💡 空席あり — 待ち客を「案内」、または「本走」で店員を入れて開始</div>`;
+      hint = `<div class="tc-hint">💡 空席あり — 空席をクリックして客・店員を入れて開始（別卓の客も移動可）</div>`;
     } else if (canSwap && waitingStart) {
-      hint = `<div class="tc-hint tc-hint-time">⏳ 開始前に「交代」で本走を待ち客に替えられます</div>`;
+      hint = `<div class="tc-hint tc-hint-time">⏳ 開始前に本走席をクリックで待ち客に交代できます</div>`;
     } else if (canSwap) {
-      hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ「交代」で本走を待ち客に替えられます</div>`;
+      hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ本走席クリックで待ち客に交代できます</div>`;
     }
 
     tbody.innerHTML = `<div class="seats">${seatsHtml}</div>${hint}<div class="tc-actions">${btns.join("")}</div>`;
   }
 
-  function seatHtml(state: GameState, s: Seat, guide = false, waitingStart = false): string {
+  function seatHtml(
+    state: GameState,
+    t: Table,
+    s: Seat,
+    seatIdx: number,
+    waitingStart = false,
+    canSwap = false,
+  ): string {
     if (s.occupant.kind === "EMPTY") {
-      return guide
-        ? `<div class="seat seat-empty seat-guide">＋ ここに案内</div>`
+      // 開始待ちの空席はクリックでアテンドピッカーを開く。
+      return waitingStart
+        ? `<div class="seat seat-empty seat-pick" data-action="pick-seat" data-id="${t.id}" data-seat="${seatIdx}">＋ 空席<small>クリックで案内</small></div>`
         : `<div class="seat seat-empty">空席</div>`;
     }
     const dealer = s.isDealer ? `<span class="seat-dealer" title="親">親</span>` : "";
     const pts = `<div class="seat-pts">${s.points.toLocaleString()}点</div>`;
     if (s.occupant.kind === "STAFF") {
       const st = state.staff.find((x) => x.id === (s.occupant as { staffId: number }).staffId);
-      return `<div class="seat seat-staff">
+      // 交代可能なら本走席クリックで交代ピッカーを開く。
+      const swapAttr = canSwap
+        ? ` seat-swap" data-action="pick-swap" data-id="${t.id}" data-seat="${seatIdx}"`
+        : `"`;
+      const swapHint = canSwap ? `<div class="seat-swaphint">🔁 クリックで交代</div>` : "";
+      return `<div class="seat seat-staff${swapAttr}>
         <div class="seat-name">🧑‍💼 ${st?.name ?? "店員"}${dealer}</div>
         <div class="seat-badge">本走</div>
         ${pts}
+        ${swapHint}
       </div>`;
     }
     const c = state.customers.get(s.occupant.customerId);
@@ -777,6 +900,11 @@ function statusLabel(t: Table): string {
     default:
       return "";
   }
+}
+
+/** 客の希望が卓レートと両立するか（ピッカー候補の絞り込み用）。 */
+function prefAllowsRate(pref: Pref, rate: Rate): boolean {
+  return pref === "ANY" || pref === rate;
 }
 
 /** 希望卓バッジ（待ち列・着席後で共用）。 */

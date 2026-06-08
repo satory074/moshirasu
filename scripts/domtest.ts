@@ -24,7 +24,11 @@ const {
   openTableAction,
   seatCustomerAction,
   honsoAction,
+  swapAction,
+  moveCustomerAction,
 } = await import("../src/game/actions");
+const { firstEmptyIdx, freeStaff } = await import("../src/game/tables");
+const { spawnCustomer } = await import("../src/game/customers");
 import type { Command } from "../src/game/render";
 import type { GameState, Result } from "../src/game/types";
 
@@ -39,9 +43,13 @@ const dispatch = (cmd: Command) => {
     case "openTable":
       return toRes(openTableAction(state, cmd.rate, cmd.customerIds));
     case "seat":
-      return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId));
+      return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
     case "honso":
-      return toRes(honsoAction(state, cmd.tableId));
+      return toRes(honsoAction(state, cmd.tableId, cmd.seatIdx, cmd.staffId));
+    case "swap":
+      return toRes(swapAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
+    case "move":
+      return toRes(moveCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
     default:
       return { ok: true };
   }
@@ -100,9 +108,12 @@ if (state.waiting.length >= 1) {
   // 空席があれば本走で埋める
   const t = state.tables[0];
   if (t.seats.some((s) => s.occupant.kind === "EMPTY")) {
-    const hr = honsoAction(state, t.id);
-    renderer.render(state);
-    console.log(`[dom] 本走: ${hr.ok ? "成功" : "失敗:" + (hr as { reason: string }).reason}`);
+    const st = freeStaff(state);
+    if (st) {
+      const hr = honsoAction(state, t.id, firstEmptyIdx(t), st.id);
+      renderer.render(state);
+      console.log(`[dom] 本走: ${hr.ok ? "成功" : "失敗:" + (hr as { reason: string }).reason}`);
+    }
   }
 }
 
@@ -112,10 +123,14 @@ while (state.phase !== "CLOSED" && guard < 100000) {
   guard++;
   // 空席を本走で埋め続ける（卓が止まらないように）
   for (const t of state.tables) {
-    if (t.progress.status === "WAITING_TO_START") {
+    if (t.progress.status === "WAITING_TO_START" && firstEmptyIdx(t) >= 0) {
+      const idx = firstEmptyIdx(t);
       const cand = state.waiting.find((c) => c.pref === "ANY" || c.pref === t.rate);
-      if (cand) seatCustomerAction(state, cand.id, t.id);
-      else if (t.seats.some((s) => s.occupant.kind === "EMPTY")) honsoAction(state, t.id);
+      if (cand) seatCustomerAction(state, cand.id, t.id, idx);
+      else {
+        const st = freeStaff(state);
+        if (st) honsoAction(state, t.id, idx, st.id);
+      }
     }
   }
   tick(state);
@@ -143,7 +158,122 @@ const stored = dom.window.localStorage.getItem("moshirasu.ranking.v1");
 assert(!!stored && stored.includes("テスト店長"), "localStorage に保存された");
 console.log("[dom] ランキング登録 OK");
 
+// ---- 席クリックのアテンド/移動/交代ピッカー ----
+{
+  // 旧 #app（1つ目の renderer の DOM）を除去。jsdom はスコープ付き querySelector("#id") が
+  // 文書内に重複IDがあると null を返すため、2つ目の renderer の前に消す（本番は単一 renderer）。
+  root.remove();
+  const ps: GameState = createInitialState(7, 6); // 本走用に店員多め
+  const root2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(root2);
+  const dispatch2 = (cmd: Command) => {
+    switch (cmd.type) {
+      case "openTable":
+        return toRes(openTableAction(ps, cmd.rate, cmd.customerIds));
+      case "seat":
+        return toRes(seatCustomerAction(ps, cmd.customerId, cmd.tableId, cmd.seatIdx));
+      case "honso":
+        return toRes(honsoAction(ps, cmd.tableId, cmd.seatIdx, cmd.staffId));
+      case "swap":
+        return toRes(swapAction(ps, cmd.customerId, cmd.tableId, cmd.seatIdx));
+      case "move":
+        return toRes(moveCustomerAction(ps, cmd.customerId, cmd.tableId, cmd.seatIdx));
+      default:
+        return { ok: true };
+    }
+  };
+  const r2 = createRenderer(root2 as unknown as HTMLElement, dispatch2);
+  r2.reset();
+
+  const a = spawnCustomer(ps);
+  a.pref = "ANY";
+  const b = spawnCustomer(ps);
+  b.pref = "ANY";
+  openTableAction(ps, "BLUE", [a.id]); // 卓t1（a 1人・空席3）
+  const t1 = ps.tables[0];
+  r2.render(ps);
+
+  // 空席クリック → ピッカーが開き、待ち客＋店員候補が出る
+  const emptySeat = root2.querySelector('[data-action="pick-seat"]') as unknown as HTMLElement;
+  assert(!!emptySeat, "空席に pick-seat 属性がある");
+  click(emptySeat);
+  assert(!!root2.querySelector("#picker .pk-panel"), "空席クリックでピッカーが開いた");
+  assert(
+    !!root2.querySelector('[data-action="choose"][data-kind="cust"]'),
+    "ピッカーに待ち客候補がある",
+  );
+  assert(
+    !!root2.querySelector('[data-action="choose"][data-kind="staff"]'),
+    "ピッカーに空き店員候補がある",
+  );
+
+  // 待ち客 b を選んで着席
+  const beforeWaiting = ps.waiting.length;
+  click(root2.querySelector(`[data-action="choose"][data-kind="cust"][data-id="${b.id}"]`) as unknown as HTMLElement);
+  assert(ps.waiting.length === beforeWaiting - 1, "案内で待ち客が1人減った");
+  assert(b.status === "SEATED" && b.seatRef?.tableId === t1.id, "b が t1 に着席");
+  assert(!root2.querySelector("#picker .pk-panel"), "選択後にピッカーが閉じた");
+  console.log("[dom] 空席クリック→案内 OK");
+
+  // pick-close でピッカーを閉じる
+  click(root2.querySelector('[data-action="pick-seat"]') as unknown as HTMLElement);
+  assert(!!root2.querySelector("#picker .pk-panel"), "ピッカーを再度開いた");
+  click(root2.querySelector('[data-action="pick-close"]') as unknown as HTMLElement);
+  assert(!root2.querySelector("#picker .pk-panel"), "pick-close でピッカーが閉じた");
+  console.log("[dom] pick-close OK");
+
+  // 別卓からの移動: 卓t2 を e 1人で立て、t1 の空席ピッカーに移動候補として出す
+  const e = spawnCustomer(ps);
+  e.pref = "ANY";
+  openTableAction(ps, "BLUE", [e.id]);
+  const tablesBefore = ps.tables.length;
+  r2.render(ps);
+  click(root2.querySelector(`[data-action="pick-seat"][data-id="${t1.id}"]`) as unknown as HTMLElement);
+  const moveBtn = root2.querySelector(`[data-action="choose"][data-kind="move"][data-id="${e.id}"]`) as unknown as HTMLElement;
+  assert(!!moveBtn, "別卓の客が移動候補として出る");
+  click(moveBtn);
+  assert(e.seatRef?.tableId === t1.id, "e が t1 へ移動した");
+  assert(ps.tables.length === tablesBefore - 1, "空になった元卓が撤去された");
+  console.log("[dom] 別卓→移動＋元卓撤去 OK");
+
+  // 交代: 満席（本走あり）の卓を作り、断った客は swap ピッカーに出ないことを確認
+  const f = spawnCustomer(ps);
+  f.pref = "ANY";
+  openTableAction(ps, "BLUE", [f.id]);
+  const t3 = ps.tables[ps.tables.length - 1];
+  // 残り3席を本走で埋めて満席に（canSwap 成立条件）
+  while (firstEmptyIdx(t3) >= 0) {
+    const st = freeStaff(ps);
+    if (!st) break;
+    honsoAction(ps, t3.id, firstEmptyIdx(t3), st.id);
+  }
+  assert(firstEmptyIdx(t3) < 0, "t3 が満席（本走で充填）");
+  const yes = spawnCustomer(ps);
+  yes.pref = "ANY";
+  const no = spawnCustomer(ps);
+  no.pref = "ANY";
+  no.refusedTables = [t3.id]; // この卓を既に断っている
+  r2.render(ps);
+  const staffSeat = root2.querySelector(`.seat-swap[data-id="${t3.id}"]`) as unknown as HTMLElement;
+  assert(!!staffSeat, "本走席に pick-swap 属性がある");
+  click(staffSeat);
+  assert(!!root2.querySelector("#picker .pk-panel"), "本走席クリックで交代ピッカーが開いた");
+  assert(
+    !!root2.querySelector(`[data-action="choose"][data-kind="swap"][data-id="${yes.id}"]`),
+    "未拒否の客は交代候補に出る",
+  );
+  assert(
+    !root2.querySelector(`[data-action="choose"][data-kind="swap"][data-id="${no.id}"]`),
+    "一度断った客は交代候補から除外（要望6）",
+  );
+  console.log("[dom] 交代ピッカー＋拒否客の除外 OK");
+}
+
 console.log("\n✅ DOM smoke test passed");
+
+function click(elm: HTMLElement) {
+  elm.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+}
 
 function microtask(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));

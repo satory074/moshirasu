@@ -13,7 +13,7 @@ import {
 } from "../src/game/actions";
 import { spawnCustomer } from "../src/game/customers";
 import { LocalRankingStore, type ScoreEntry } from "../src/game/ranking";
-import { firstEmptyIdx } from "../src/game/tables";
+import { firstEmptyIdx, freeStaff } from "../src/game/tables";
 import type { GameState, Rate } from "../src/game/types";
 
 // ---- 1) 精算がゼロサムか（実点棒ベース・場代/祝儀を除いた素点ベース）----
@@ -76,14 +76,17 @@ function autoManage(state: GameState) {
   for (const t of state.tables) {
     if (t.progress.status !== "WAITING_TO_START") continue;
     while (firstEmptyIdx(t) >= 0) {
+      const idx = firstEmptyIdx(t);
       // 同レート希望 or ANY の待ち客を案内
       const cand = state.waiting.find((c) => c.pref === "ANY" || c.pref === t.rate);
       if (cand) {
-        const r = seatCustomerAction(state, cand.id, t.id);
+        const r = seatCustomerAction(state, cand.id, t.id, idx);
         if (!r.ok) break;
       } else {
         // 客がいなければ本走（客が1人以上いる卓のみ）
-        const r = honsoAction(state, t.id);
+        const st = freeStaff(state);
+        if (!st) break;
+        const r = honsoAction(state, t.id, idx, st.id);
         if (!r.ok) break;
       }
     }
@@ -113,10 +116,14 @@ function autoPlayBlue(seed: number): GameState {
     for (const t of state.tables) {
       if (t.progress.status !== "WAITING_TO_START") continue;
       while (firstEmptyIdx(t) >= 0) {
+        const idx = firstEmptyIdx(t);
         const cand = state.waiting.find((c) => c.pref === "ANY" || c.pref === t.rate);
         if (cand) {
-          if (!seatCustomerAction(state, cand.id, t.id).ok) break;
-        } else if (!honsoAction(state, t.id).ok) break;
+          if (!seatCustomerAction(state, cand.id, t.id, idx).ok) break;
+        } else {
+          const st = freeStaff(state);
+          if (!st || !honsoAction(state, t.id, idx, st.id).ok) break;
+        }
       }
     }
     if (state.tables.length < CONFIG.maxTables) {
@@ -281,7 +288,7 @@ console.log(`[tables] maxTables=${CONFIG.maxTables}`);
   console.log(`[rate] 全員どちらでも → レート ${before}→${t.rate} に変更 OK`);
   const c2 = spawnCustomer(state);
   c2.pref = "BLUE"; // 卓は now BLUE なので着席可
-  seatCustomerAction(state, c2.id, t.id);
+  seatCustomerAction(state, c2.id, t.id, firstEmptyIdx(t));
   if (changeRateAction(state, t.id).ok) throw new Error("changeRate should fail with non-ANY customer");
   console.log("[rate] 点5希望が混在 → レート変更を正しく拒否");
 }
