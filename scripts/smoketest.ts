@@ -7,12 +7,12 @@ import { tick } from "../src/game/engine";
 import {
   changeRateAction,
   combineAction,
-  hireStaffAction,
   honsoAction,
   openTableAction,
   seatCustomerAction,
 } from "../src/game/actions";
 import { spawnCustomer } from "../src/game/customers";
+import { LocalRankingStore, type ScoreEntry } from "../src/game/ranking";
 import { firstEmptyIdx } from "../src/game/tables";
 import type { GameState, Rate } from "../src/game/types";
 
@@ -165,19 +165,50 @@ console.log(
 if (totalRev <= 0) throw new Error("no revenue generated");
 if (hanchan <= 0) throw new Error("no hanchan played");
 
-// ---- 3) 店員雇用と局シミュの不変条件 ----
+// ---- 3) 開店前設定の店員数が反映され、人件費が店員数にスケールする ----
 {
-  const state = createInitialState(7);
-  const before = state.staff.length;
-  const r = hireStaffAction(state);
-  if (!r.ok) throw new Error("hire failed");
-  if (state.staff.length !== before + 1) throw new Error("staff not incremented");
-  // 上限まで雇えるか
-  while (hireStaffAction(state).ok) {
-    /* loop */
+  // createInitialState 第2引数で店員数を指定できる。
+  if (createInitialState(7, 5).staff.length !== 5) throw new Error("staffCount not applied");
+  if (createInitialState(7, 1).staff.length !== 1) throw new Error("staffCount=1 not applied");
+
+  // 同条件で営業させると、店員が多いほど人件費が大きい。
+  const few = createInitialState(7, 1);
+  const many = createInitialState(7, 8);
+  for (let i = 0; i < 120; i++) {
+    tick(few);
+    tick(many);
   }
-  if (state.staff.length !== CONFIG.maxStaff) throw new Error("maxStaff not enforced");
-  console.log(`[hire] 店員 ${before}→${state.staff.length}（上限${CONFIG.maxStaff}）`);
+  if (!(many.expenses.wages > few.expenses.wages)) {
+    throw new Error(`wages should scale with staff: few=${few.expenses.wages} many=${many.expenses.wages}`);
+  }
+  console.log(
+    `[staff] 店員数=設定可（1/5/8）。120分で人件費 1人=¥${Math.round(few.expenses.wages)} < 8人=¥${Math.round(many.expenses.wages)}`,
+  );
+}
+
+// ---- 3b) ローカルランキング: 利益降順＋タイブレークで並ぶ ----
+{
+  const store = new LocalRankingStore(); // node は localStorage 無 → メモリ実装
+  const mk = (id: string, profit: number, served: number, atIso: string): ScoreEntry => ({
+    id,
+    name: id,
+    profit,
+    rank: "B",
+    staffCount: 2,
+    served,
+    hanchan: 10,
+    seed: 1,
+    atIso,
+  });
+  await store.submit(mk("a", 100000, 5, "2026-01-01T00:00:00.000Z"));
+  await store.submit(mk("b", 300000, 5, "2026-01-01T00:00:00.000Z"));
+  await store.submit(mk("c", 200000, 5, "2026-01-01T00:00:00.000Z"));
+  // タイブレーク: 同利益は接客数が多い方が上。
+  await store.submit(mk("d", 300000, 9, "2026-01-01T00:00:01.000Z"));
+  const top = await store.fetchTop(10);
+  const order = top.map((e) => e.id).join(",");
+  if (order !== "d,b,c,a") throw new Error(`ranking order wrong: ${order}`);
+  console.log(`[ranking] 利益降順＋タイブレーク OK: ${order}`);
 }
 
 // ---- 4) 局シミュ: 半荘中の点棒合計は常に 100000（ゼロサム移動）----

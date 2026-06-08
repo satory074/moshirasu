@@ -745,6 +745,186 @@ import "../styles/globals.css";
         padding: 0.7rem;
         font-size: 0.95rem;
       }
+      .result-best {
+        display: inline-block;
+        margin: 0.1rem 0 0.6rem;
+        padding: 0.2rem 0.7rem;
+        border-radius: 999px;
+        background: #fef3c7;
+        color: #b45309;
+        font-weight: 800;
+        font-size: 0.82rem;
+      }
+
+      /* ===== ランキング（リザルト内）===== */
+      .rank-submit {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .rank-name {
+        flex: 1;
+        min-width: 0;
+        min-height: 44px;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-md, 8px);
+        background: var(--surface-2);
+        color: var(--ink);
+        font-size: 0.9rem;
+      }
+      .rank-submit-btn {
+        flex: 0 0 auto;
+        min-height: 44px;
+        padding: 0.5rem 0.9rem;
+        font-size: 0.85rem;
+        white-space: nowrap;
+      }
+      .rank-note {
+        font-size: 0.78rem;
+        color: var(--muted);
+        min-height: 1rem;
+        margin-bottom: 0.6rem;
+        text-align: left;
+      }
+      .ranking-head {
+        font-weight: 800;
+        font-size: 0.9rem;
+        text-align: left;
+        margin-bottom: 0.4rem;
+      }
+      .ranking-list {
+        text-align: left;
+        max-height: 220px;
+        overflow-y: auto;
+        margin-bottom: 1rem;
+      }
+      .ranking-empty {
+        color: var(--muted);
+        font-size: 0.82rem;
+        padding: 0.6rem 0;
+      }
+      .ranking-row {
+        display: grid;
+        grid-template-columns: 1.6rem 1.4rem 1fr auto;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.82rem;
+        padding: 0.3rem 0.4rem;
+        border-bottom: 1px dashed var(--border);
+        border-radius: 6px;
+      }
+      .ranking-me {
+        background: #fff7ed;
+        outline: 2px solid #f59e0b;
+      }
+      .ranking-pos {
+        font-weight: 800;
+        color: var(--muted);
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .ranking-badge {
+        font-weight: 900;
+        text-align: center;
+      }
+      .ranking-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ranking-profit {
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ===== 開店前設定（店員数）オーバーレイ ===== */
+      .setup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 14, 11, 0.78);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 70;
+        backdrop-filter: blur(3px);
+      }
+      .setup-overlay.show {
+        display: flex;
+      }
+      .setup-card {
+        background: var(--surface-1);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-lg);
+        padding: 1.6rem 1.8rem;
+        text-align: center;
+        max-width: 420px;
+        width: 92%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      .setup-title {
+        font-size: 1.4rem;
+        font-weight: 900;
+      }
+      .setup-lead {
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.6;
+        margin: 0.5rem 0 1.1rem;
+      }
+      .setup-lead b {
+        color: var(--ink);
+      }
+      .setup-stepper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1.2rem;
+        margin-bottom: 0.4rem;
+      }
+      .setup-step-btn {
+        min-width: 48px;
+        min-height: 48px;
+        font-size: 1.6rem;
+        font-weight: 900;
+        line-height: 1;
+        border: 1px solid var(--border-strong);
+        border-radius: 50%;
+        background: var(--surface-2);
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .setup-step-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .setup-count {
+        min-width: 4.5rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .setup-count b {
+        font-size: 2.6rem;
+        font-weight: 900;
+      }
+      .setup-count span {
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-left: 0.2rem;
+      }
+      .setup-range {
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+      .setup-wage {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin: 0.5rem 0 1.1rem;
+      }
+      .setup-start {
+        width: 100%;
+        min-height: 48px;
+        font-size: 1rem;
+      }
 
       /* ===== フッター ===== */
       .page-foot {

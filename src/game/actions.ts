@@ -1,7 +1,6 @@
 // ===== プレイヤー命令層（UIはここ経由でしか state を変えない）=====
 
 import { CONFIG } from "./config";
-import { staffName } from "./names";
 import { addLog, adjustReputation } from "./state";
 import {
   attemptSwap,
@@ -199,22 +198,6 @@ export function changeRateAction(state: GameState, tableId: number): Result {
     state,
     "OPEN",
     `🔁 卓#${tableNo(state, table)} のレートを ${table.rate === "BLUE" ? "点5(ブルー)" : "点3(グリーン)"} に変更`,
-  );
-  return { ok: true };
-}
-
-/** 店員を1人雇う。本走の手数は増えるが、人件費（時給）が利益を圧迫する。 */
-export function hireStaffAction(state: GameState): Result {
-  if (state.staff.length >= CONFIG.maxStaff) {
-    return { ok: false, reason: `店員は最大${CONFIG.maxStaff}人までです` };
-  }
-  const id = state.staff.length; // 店員IDは固定域（0,1,2,...）を連番で
-  const name = staffName(id);
-  state.staff.push({ id, name, busy: false });
-  addLog(
-    state,
-    "HONSO",
-    `🧑‍💼 ${name} を雇った（時給¥${CONFIG.wagePerHourYen.toLocaleString()}・現在${state.staff.length}人）`,
   );
   return { ok: true };
 }

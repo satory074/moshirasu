@@ -3,7 +3,6 @@
 import {
   changeRateAction,
   combineAction,
-  hireStaffAction,
   honsoAction,
   openTableAction,
   seatCustomerAction,
@@ -45,8 +44,9 @@ export function boot(): void {
         return toRes(combineAction(state, cmd.a, cmd.b));
       case "changeRate":
         return toRes(changeRateAction(state, cmd.tableId));
-      case "hireStaff":
-        return toRes(hireStaffAction(state));
+      case "startGame":
+        startGame(cmd.staffCount);
+        return { ok: true };
       case "advance":
         engine.advance();
         return { ok: true };
@@ -62,31 +62,35 @@ export function boot(): void {
     return r.ok ? { ok: true } : { ok: false, reason: r.reason };
   }
 
-  function startNew(seed: number) {
-    state = createInitialState(seed);
+  function startNew(seed: number, staffCount: number) {
+    state = createInitialState(seed, staffCount);
     renderer.reset();
     engine = createEngine(state, renderer.render);
     renderer.render(state); // 自動進行はしない。最初の描画のみ。
   }
 
-  function restart() {
-    engine?.stop();
-    startNew(newSeed());
+  // 開店前設定で店員数を決めて営業開始。
+  function startGame(staffCount: number) {
+    renderer.hideSetup();
+    startNew(readSeed(), staffCount);
   }
 
-  // キーボード: スペースで「次のイベントへ」
+  function restart() {
+    engine?.stop();
+    renderer.reset();
+    renderer.showSetup(); // 再戦時も店員数を選び直す（「最初だけ決定」を一貫）。
+  }
+
+  // キーボード: スペースで「次のイベントへ」（設定画面表示中は無効）
   window.addEventListener("keydown", (e) => {
     if (e.code === "Space") {
       e.preventDefault();
-      dispatch({ type: "advance" });
+      if (state) dispatch({ type: "advance" });
     }
   });
 
-  startNew(readSeed());
-}
-
-function newSeed(): number {
-  return Math.floor(Date.now() % 2147483647) || 67890;
+  // 起動時は即開始せず、開店前設定（店員数）を表示する。
+  renderer.showSetup();
 }
 
 // DOM 準備後に起動

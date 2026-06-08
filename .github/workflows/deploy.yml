@@ -27,6 +27,9 @@ jobs:
       - run: npm run build
         env:
           GH_USER: ${{ github.repository_owner }}
+          # 共有ランキング（任意）。未設定ならローカルランキングにフォールバックする。
+          PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.PUBLIC_SUPABASE_ANON_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist

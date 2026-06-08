@@ -5,11 +5,11 @@ import { staffName } from "./names";
 import { createRng } from "./rng";
 import type { GameState, LogEntry, LogKind, Staff } from "./types";
 
-/** 初期状態を生成する。 */
-export function createInitialState(seed: number): GameState {
+/** 初期状態を生成する。店員数は開店前設定で決め（既定 CONFIG.staffCount）、以降は変えない。 */
+export function createInitialState(seed: number, staffCount: number = CONFIG.staffCount): GameState {
   const rng = createRng(seed);
   const staff: Staff[] = [];
-  for (let i = 0; i < CONFIG.staffCount; i++) {
+  for (let i = 0; i < staffCount; i++) {
     staff.push({ id: i, name: staffName(i), busy: false });
   }
   return {

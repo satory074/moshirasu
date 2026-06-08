@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**モシラス** — a **turn-based** 雀荘 (free mahjong parlor) management simulation game. You play the floor manager: seat customers at tables, fill empty seats by playing 本走 (staff sit-in), swap/combine tables, hire more staff, and maximize **利益 (profit = 場代売上 − 人件費)** from open to close. Time only advances when you press **「次のイベントへ」**, which fast-forwards (animated) until the next decision point and auto-stops. Astro 5 + Tailwind v4 static site (**light theme**), deployed to GitHub Pages. Live: https://satory074.github.io/moshirasu/
+**モシラス** — a **turn-based** 雀荘 (free mahjong parlor) management simulation game. You play the floor manager: **decide the staff headcount on a pre-open setup screen** (1〜`maxTables*4`, fixed for the day — no in-play hiring), then seat customers at tables, fill empty seats by playing 本走 (staff sit-in), swap/combine tables, and maximize **利益 (profit = 場代売上 − 人件費)** from open to close. On 閉店 you enter a name and **submit your profit to a ranking** (local by default; shared via Supabase if env is set). Time only advances when you press **「次のイベントへ」**, which fast-forwards (animated) until the next decision point and auto-stops. Astro 5 + Tailwind v4 static site (**light theme**), deployed to GitHub Pages. Live: https://satory074.github.io/moshirasu/
 
 Each 半荘 is simulated **局-by-局** (東1局〜南4局, 親番ローテ, 連荘/本場): every 局 moves **real 点棒** between the 4 seats (zero-sum, staff included), and final placement is decided by accumulated 点棒 — not a one-shot roll. 点5(BLUE) hands swing harder (`blueHandMult`), so a thin-stacked customer can 飛ぶ (bust). Up to **12 tables** (`CONFIG.maxTables`).
 
@@ -35,12 +35,13 @@ Module map (all in `src/game/`):
 | `types.ts` | All entity types. Single source of truth, no logic (avoids circular imports). |
 | `config.ts` | **ALL balance constants** live in the frozen `CONFIG`. Tune here, nowhere else. |
 | `rng.ts` | Seeded mulberry32 PRNG. |
-| `state.ts` | `createInitialState`, `addLog`, `nextId`, `addRevenue`, `adjustReputation`. The container, not the rules. `expenses.wages` accrues here-adjacent (in `engine.tick`). |
+| `state.ts` | `createInitialState(seed, staffCount?)`, `addLog`, `nextId`, `addRevenue`, `adjustReputation`. The container, not the rules. `staffCount` is chosen on the setup screen (default `CONFIG.staffCount`). `expenses.wages` accrues here-adjacent (in `engine.tick`). |
 | `economy.ts` | Per-半荘 settlement math: ranks seats by **accumulated real 点棒**, then 素点→オカ/ウマ/祝儀→円. 場代 collection, bankroll. Pure. |
 | `customers.ts` | Arrival spawning, stat rolls, wait/rage-quit, post-半荘 leave/stay decision. |
 | `tables.ts` | Table/seat logic + the 局-driven 半荘 engine (`advanceHanchan`/`advanceKyokus`/`resolveKyoku`), 本走/swap/combine/rate-change (`canChangeRate`), `tickSeatedWaiting`. The biggest rules module. |
-| `actions.ts` | Player command layer. Each returns `Result`; UI mutates state *only* through here. |
+| `actions.ts` | Player command layer. Each returns `Result`; UI mutates state *only* through here. (No `hireStaffAction` — staff is fixed at setup.) |
 | `engine.ts` | Turn-based `advance()` (event-driven auto-stop via `detectStop`) + the deterministic per-tick orchestration order in `tick()`. |
+| `ranking.ts` | Score persistence. `RankingStore` interface (async) with `LocalRankingStore` (localStorage/memory, DI'd storage) + `SupabaseRankingStore` (plain `fetch` to PostgREST, no SDK). `createRankingStore()` picks Supabase if `PUBLIC_SUPABASE_*` env is set, else local. `buildScoreEntry`/`percentile`. DOM-free. |
 | `selectors.ts` | Read-only derived views for rendering (formatClock, `kpis` incl. `profit`/`wages`, `kyokuLabel`, progress ratios). |
 | `render.ts` | state→DOM. Keyed element maps + event delegation. Owns transient UI selection state. |
 | `main.ts` | Composition root: wires state→renderer→engine, handles restart and the spacebar = 「次のイベントへ」 shortcut. |
@@ -55,7 +56,9 @@ Module map (all in `src/game/`):
 
 - **Settlement is zero-sum** (`economy.ts` `settleHanchan`): ranks the 4 seats by **accumulated real 点棒** (tie → 起家/席順), then 素点 `= (点棒 − kaeshi)/1000`, +オカ to 1st, +ウマ — which sum to 0 because Σ点棒 ≡ 100000 (the 局 engine keeps it exact). Converted to yen by rate. 祝儀 exists only on BLUE(点5), itself zero-sum. The smoke test asserts GREEN settlements sum to 0 **and** that in-play Σ点棒 == 100000 every tick. (The old cosmetic `driftPoints` and `pointSpread`/`bigSwing*` spread model are **gone**; `CONFIG.kyoku.handValues` + `blueHandMult` now drive the heavy tail / bust risk.)
 
-- **本走 earns no 場代**: only `CUSTOMER` seats pay (`collectGameFee`); staff play real 点棒 but their yen result is ignored (no bankroll) and they never 飛ぶ-leave. Staff sit-in starts a table with <4 customers. **Hiring more staff (`hireStaffAction`, up to `CONFIG.maxStaff`) adds 本走 capacity but accrues `wagePerHourYen` every tick → 利益 = 売上 − 人件費.** Routing flexible (ANY) customers to BLUE for higher 場代 vs. higher bust variance, and sizing staff vs. wage drag, are the central optimizations.
+- **本走 earns no 場代**: only `CUSTOMER` seats pay (`collectGameFee`); staff play real 点棒 but their yen result is ignored (no bankroll) and they never 飛ぶ-leave. Staff sit-in starts a table with <4 customers. **The staff headcount is chosen once on the pre-open setup screen (1〜`CONFIG.maxTables*4`, default `CONFIG.staffCount`) and cannot change mid-day** — more staff = more 本走 capacity but accrues `wagePerHourYen` every tick → 利益 = 売上 − 人件費. Routing flexible (ANY) customers to BLUE for higher 場代 vs. higher bust variance, and **sizing staff at setup vs. wage drag**, are the central optimizations.
+
+- **Setup screen & ranking flow** (`render.ts`/`main.ts`/`ranking.ts`): boot shows `#setup` (店員数 stepper) instead of starting; `start-game` → `Command{startGame,staffCount}` → `main.startGame` → `createInitialState(seed, staffCount)`. `restart` returns to `#setup` (re-choose). On 閉店, `renderResult` builds the result card **once** (`rankingView.builtForClosed`, so the name `<input>` isn't clobbered on re-render), async-loads `fetchTop(10)`, and `submit-score` posts via the `RankingStore`. Ranking display/submit is renderer-owned transient state (not in `GameState`). Player name + personal-best live in `localStorage` (`moshirasu.playerName`/`moshirasu.bestProfit`).
 
 - **Seated-but-not-started counts as waiting**: `markSeated` no longer resets `waitedMin`; a customer seated at a not-yet-full table keeps accumulating impatience (at `CONFIG.kyoku.seatedWaitMult` rate) via `tickSeatedWaiting` and can rage-quit from the seat. `waitedMin` resets only when the 半荘 actually starts (`startHanchan`).
 
@@ -71,6 +74,8 @@ Module map (all in `src/game/`):
 - **進行ボタンは2箇所に描画**: `renderAdvance` は同じ「次のイベントへ」ボタンを HUD内 `#advance-wrap`（PC）と画面下部固定の `#advance-bar`（スマホ）の両方に注入し、CSS `@media (max-width:960px)` でどちらか一方だけ表示する。片方だけ直すとレイアウトがずれる。
 - **モバイルのログ折りたたみはJSなし**: `#log-toggle` チェックボックス＋label の CSS 兄弟セレクタ（`@media (max-width:960px)`）で開閉。エンジンは従来通り `#log` に描画するだけ。
 - **局シミュ定数は `CONFIG.kyoku` に集約**: `kyokuMin`/`ryuukyokuProb`/`tsumoProb`/`winSkillW`/`winLuckW`/`dealerWinMult`/`handValues`/`blueHandMult`/`maxKyokuPerHanchan`/`maxHonba`/`seatedWaitMult`。半荘長・飛び頻度・1日の半荘数（=売上）はここで決まる。`handValues`/`blueHandMult` を上げると点5の飛びが増えるが反動でブレも増える。スコア評価は `scoreRank(利益)`＝`targetProfit` 基準（旧 `targetRevenue` は参考値）。
-- **店員IDは固定域・客/卓IDは1000+**: `createInitialState` の店員は `id:0,1,…`、`hireStaffAction` も `state.staff.length` を連番IDに使う（`nextId` の1000+域と衝突しない）。`staffName(idx)` は4人を超えると `メンバー N` にフォールバック。
+- **店員IDは固定域・客/卓IDは1000+**: `createInitialState` の店員は `id:0,1,…`（`nextId` の1000+域と衝突しない）。`staffName(idx)` は4人を超えると `メンバー N` にフォールバック（設定で最大 `maxTables*4`=48人まで選べるが破綻しない）。
+
+- **ランキングは外部書き込み先が要る**: 共有ランキングは GitHub Pages 単体では不可（静的配信＝書き込み不可）。`PUBLIC_SUPABASE_URL`/`PUBLIC_SUPABASE_ANON_KEY`（Astro は `PUBLIC_` プレフィックス必須、`NEXT_PUBLIC_` ではない）を `.env`/Actions Secrets に設定すると Supabase 共有、未設定ならローカル（localStorage）に自動フォールバック。Supabase 側は `scores` テーブル＋RLS（SELECT/INSERT のみ・`WITH CHECK` で値制約）。`@supabase/supabase-js` は入れず素の `fetch` で PostgREST を叩く（依存ゼロ）。anon key は RLS 前提で公開可、**service_role key は置かない**。詳細SQLは承認済みプラン参照。
 - **卓グリッドは `auto-fill minmax(240px,1fr)`**: `maxTables:12` でも `#tables` のCSSはそのまま流れる（`index.astro` の `<style is:global>`）。`卓 N/12` 表記は `CONFIG.maxTables` 参照で自動追従。
 - **合卓はレート違いでもOK・レート変更も可**: `canCombine` は構造条件（半荘前・客合計1〜4）だけを見て、レート整合は `combineAction` が判定する。両卓の客の希望を両立できるレート（`combineRate`）へ集約し、点5希望と点3希望が混在する場合のみ拒否。`changeRateAction`/`canChangeRate` は「半荘前・客が全員ANY(どちらでも)」の卓のレートを点5⇄点3で切替（混在卓では不可）。どちらも `Customer.pref` を尊重するのが不変条件。

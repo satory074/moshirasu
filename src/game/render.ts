@@ -5,6 +5,13 @@
 
 import { CONFIG, scoreRank } from "./config";
 import { rateLabel } from "./economy";
+import {
+  buildScoreEntry,
+  createRankingStore,
+  percentile,
+  type RankingStore,
+  type ScoreEntry,
+} from "./ranking";
 import { canChangeRate } from "./tables";
 import {
   dayProgress,
@@ -27,7 +34,7 @@ export type Command =
   | { type: "swap"; customerId: number; tableId: number }
   | { type: "combine"; a: number; b: number }
   | { type: "changeRate"; tableId: number }
-  | { type: "hireStaff" }
+  | { type: "startGame"; staffCount: number }
   | { type: "advance" }
   | { type: "restart" };
 
@@ -38,8 +45,31 @@ interface UiState {
   combineFirst: number | null; // 合卓の1卓目
 }
 
+/** 開店前設定（ゲーム状態とは独立した transient UI 状態）。 */
+interface SetupState {
+  staffCount: number;
+}
+
+/** リザルトのランキング表示状態（state には載らない外部データ）。 */
+interface RankingView {
+  builtForClosed: boolean; // この閉店セッションでカードを構築済みか
+  loaded: boolean; // fetchTop 完了したか
+  entries: ScoreEntry[]; // 表示中のTOP
+  submittedId: string | null; // 今回登録したエントリID（ハイライト用）
+  isNewBest: boolean; // 自己ベスト更新か
+}
+
 export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   const ui: UiState = { selected: [], combineFirst: null };
+  const setupState: SetupState = { staffCount: CONFIG.staffCount };
+  const rankingStore: RankingStore = createRankingStore();
+  const rankingView: RankingView = {
+    builtForClosed: false,
+    loaded: false,
+    entries: [],
+    submittedId: null,
+    isNewBest: false,
+  };
   let lastState: GameState | null = null;
   let toastTimer = 0;
 
@@ -72,6 +102,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     log: must("#log"),
     toast: must("#toast"),
     result: must("#result"),
+    setup: must("#setup"),
   };
 
   function must(sel: string): HTMLElement {
@@ -83,8 +114,21 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   // ---- クリック委譲 ----
   root.addEventListener("click", (ev) => {
     const target = (ev.target as HTMLElement).closest<HTMLElement>("[data-action]");
-    if (!target || !lastState) return;
+    if (!target) return;
     const action = target.dataset.action!;
+
+    // 開店前設定の操作は lastState（ゲーム状態）が無くても動く必要がある。
+    if (action === "setup-dec" || action === "setup-inc") {
+      adjustSetup(action === "setup-inc" ? 1 : -1);
+      renderSetup();
+      return;
+    }
+    if (action === "start-game") {
+      fire({ type: "startGame", staffCount: setupState.staffCount });
+      return;
+    }
+
+    if (!lastState) return;
     const id = Number(target.dataset.id ?? "0");
     const id2 = Number(target.dataset.id2 ?? "0");
 
@@ -125,8 +169,8 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       case "change-rate":
         fire({ type: "changeRate", tableId: id });
         break;
-      case "hire-staff":
-        fire({ type: "hireStaff" });
+      case "submit-score":
+        void onSubmitScore();
         break;
       case "advance":
         fire({ type: "advance" });
@@ -189,6 +233,54 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     el.waiting.innerHTML = "";
     el.log.innerHTML = "";
     el.result.className = "result-overlay";
+    el.result.innerHTML = "";
+    // ランキング表示状態をリセット（次の閉店で作り直す）。setupState は保持。
+    rankingView.builtForClosed = false;
+    rankingView.loaded = false;
+    rankingView.entries = [];
+    rankingView.submittedId = null;
+    rankingView.isNewBest = false;
+  }
+
+  // ---- 開店前設定（店員数）----
+  function adjustSetup(delta: number) {
+    const min = CONFIG.staffMin;
+    const max = CONFIG.maxTables * 4; // 全卓・全席を本走で埋められる上限
+    setupState.staffCount = Math.max(min, Math.min(max, setupState.staffCount + delta));
+  }
+
+  function renderSetup() {
+    const n = setupState.staffCount;
+    const min = CONFIG.staffMin;
+    const max = CONFIG.maxTables * 4;
+    const hours = (CONFIG.closeMin - CONFIG.openMin) / 60;
+    const estWage = Math.round(n * CONFIG.wagePerHourYen * hours);
+    el.setup.innerHTML = `
+      <div class="setup-card">
+        <div class="setup-title">🀄 開店準備</div>
+        <div class="setup-lead">
+          本走に入れる<b>店員の数</b>を決めて開店します。多いほど卓を埋めやすい一方、
+          時給${yen(CONFIG.wagePerHourYen)}/人の人件費が利益を圧迫します。<br>
+          <b>店員数は開店後は変更できません。</b>
+        </div>
+        <div class="setup-stepper">
+          <button data-action="setup-dec" class="setup-step-btn" ${n <= min ? "disabled" : ""} aria-label="減らす">−</button>
+          <div class="setup-count"><b>${n}</b><span>人</span></div>
+          <button data-action="setup-inc" class="setup-step-btn" ${n >= max ? "disabled" : ""} aria-label="増やす">＋</button>
+        </div>
+        <div class="setup-range">選択範囲 ${min}〜${max}人</div>
+        <div class="setup-wage">想定人件費（約${hours.toFixed(1)}時間営業）: 約 ${yen(estWage)}</div>
+        <button data-action="start-game" class="btn btn-blue setup-start">▶ ${n}人で開店する</button>
+      </div>`;
+    el.setup.className = "setup-overlay show";
+  }
+
+  function showSetup() {
+    renderSetup();
+  }
+
+  function hideSetup() {
+    el.setup.className = "setup-overlay";
   }
 
   // ---- メイン描画 ----
@@ -228,18 +320,14 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const total = state.staff.length;
     const busy = state.staff.filter((s) => s.busy).length;
     const free = total - busy;
-    const atMax = total >= CONFIG.maxStaff;
-    const hireBtn = isClosed(state)
-      ? ""
-      : `<button data-action="hire-staff" class="mini mini-staff" ${atMax ? "disabled" : ""}>➕ 雇う（時給${yen(CONFIG.wagePerHourYen)}）</button>`;
+    // 店員数は開店前に確定済み（進行中の増員は不可）。情報表示のみ。
     el.staff.innerHTML = `
       <div class="staff-info">
         <span class="staff-emoji">🧑‍💼</span>
         <span class="staff-count">店員 <b>${total}</b>人</span>
         <span class="staff-detail">本走中 ${busy} ・ 空き ${free}</span>
         <span class="staff-wage">人件費 ${yen(state.expenses.wages)}</span>
-      </div>
-      <div class="staff-actions">${hireBtn}</div>`;
+      </div>`;
   }
 
   function renderAdvance(state: GameState) {
@@ -496,16 +584,36 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   function renderResult(state: GameState) {
     if (!isClosed(state)) {
       el.result.className = "result-overlay";
+      rankingView.builtForClosed = false;
       return;
     }
+    el.result.className = "result-overlay show";
+    // カードは閉店セッションで一度だけ構築（名前入力欄を再描画で潰さない）。
+    if (!rankingView.builtForClosed) {
+      buildResultCard(state);
+      rankingView.builtForClosed = true;
+      rankingView.loaded = false;
+      rankingView.entries = [];
+      rankingView.submittedId = null;
+      void loadRanking();
+    }
+    updateRankingList();
+  }
+
+  function buildResultCard(state: GameState) {
     const k = kpis(state);
     const { rank, comment } = scoreRank(k.profit);
-    el.result.className = "result-overlay show";
+    rankingView.isNewBest = recordPersonalBest(Math.round(k.profit));
+    const savedName = lsGet("moshirasu.playerName") ?? "";
+    const bestLine = rankingView.isNewBest
+      ? `<div class="result-best">🎉 自己ベスト更新！</div>`
+      : "";
     el.result.innerHTML = `
       <div class="result-card">
         <div class="result-rank rank-${rank}">${rank}</div>
         <div class="result-title">本日の営業終了</div>
         <div class="result-comment">${comment}</div>
+        ${bestLine}
         <div class="result-grid">
           <div><span>利益</span><b>${yen(k.profit)}</b></div>
           <div><span>売上（場代）</span><b>${yen(k.revenue)}</b></div>
@@ -519,11 +627,140 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
           <div><span>同時待ちピーク</span><b>${state.stats.peakWaiting}人</b></div>
           <div><span>最終評判</span><b>${Math.round(state.reputation)}</b></div>
         </div>
-        <button data-action="restart" class="btn btn-blue result-restart">🔁 もう一度開店する</button>
+        <div class="rank-submit">
+          <input id="rank-name" class="rank-name" maxlength="20" placeholder="店名・プレイヤー名" value="${escapeAttr(savedName)}" />
+          <button data-action="submit-score" class="btn btn-blue rank-submit-btn">🏆 ランキングに登録</button>
+        </div>
+        <div id="rank-note" class="rank-note"></div>
+        <div class="ranking-head">🏆 ランキング（利益順）</div>
+        <div id="ranking-list" class="ranking-list"></div>
+        <button data-action="restart" class="btn btn-green result-restart">🔁 もう一度開店する</button>
       </div>`;
   }
 
-  return { render, reset };
+  /** 利益順TOPを非同期ロード（リモート失敗時はローカルキャッシュ）。 */
+  async function loadRanking() {
+    let entries: ScoreEntry[] = [];
+    try {
+      entries = await rankingStore.fetchTop(10);
+    } catch {
+      entries = [];
+    }
+    rankingView.entries = entries;
+    rankingView.loaded = true;
+    rerender();
+  }
+
+  /** スコア登録（名前を保存し、楽観的にハイライト）。 */
+  async function onSubmitScore() {
+    if (!lastState || !isClosed(lastState)) return;
+    const input = el.result.querySelector<HTMLInputElement>("#rank-name");
+    const name = input?.value ?? "";
+    lsSet("moshirasu.playerName", name.trim());
+    const entry = buildScoreEntry(lastState, name);
+    rankingView.submittedId = entry.id;
+    el.result.querySelector<HTMLButtonElement>('[data-action="submit-score"]')?.setAttribute("disabled", "");
+    try {
+      rankingView.entries = await rankingStore.submit(entry);
+    } catch {
+      // ストア側でローカルフォールバック済み。最低限自分のエントリは見せる。
+      if (!rankingView.entries.some((e) => e.id === entry.id)) {
+        rankingView.entries = [entry, ...rankingView.entries];
+      }
+    }
+    rankingView.loaded = true;
+    rerender();
+  }
+
+  /** ランキングリスト領域だけを更新（カードは再構築しない）。 */
+  function updateRankingList() {
+    const listEl = el.result.querySelector<HTMLElement>("#ranking-list");
+    if (!listEl) return;
+    const submitBtn = el.result.querySelector<HTMLButtonElement>('[data-action="submit-score"]');
+    if (rankingView.submittedId && submitBtn) submitBtn.setAttribute("disabled", "");
+
+    if (!rankingView.loaded) {
+      listEl.innerHTML = `<div class="ranking-empty">読み込み中…</div>`;
+      return;
+    }
+    const entries = rankingView.entries.slice(0, 10);
+    if (entries.length === 0) {
+      listEl.innerHTML = `<div class="ranking-empty">まだ記録がありません。最初の1人になろう！</div>`;
+    } else {
+      // 競技順位（同点は同順位）。
+      let displayRank = 0;
+      let prevProfit: number | null = null;
+      const rows = entries.map((e, i) => {
+        if (prevProfit === null || e.profit !== prevProfit) displayRank = i + 1;
+        prevProfit = e.profit;
+        const me = e.id === rankingView.submittedId ? " ranking-me" : "";
+        return `<div class="ranking-row${me}">
+          <span class="ranking-pos">${displayRank}</span>
+          <span class="ranking-badge rank-${e.rank}">${e.rank}</span>
+          <span class="ranking-name">${escapeHtml(e.name)}</span>
+          <span class="ranking-profit">${yen(e.profit)}</span>
+        </div>`;
+      });
+      listEl.innerHTML = rows.join("");
+    }
+
+    // 登録後の自分の位置（パーセンタイル）を表示。
+    const noteEl = el.result.querySelector<HTMLElement>("#rank-note");
+    if (noteEl) {
+      if (rankingView.submittedId) {
+        const me = rankingView.entries.find((e) => e.id === rankingView.submittedId);
+        if (me) {
+          const pct = percentile(me, rankingView.entries);
+          noteEl.innerHTML = `✅ 登録しました — あなたは上位 <b>${pct}%</b>（${rankingView.entries.length}人中）`;
+        } else {
+          noteEl.textContent = "✅ 登録しました";
+        }
+      } else {
+        noteEl.textContent = "";
+      }
+    }
+  }
+
+  /** 個人ベスト（このブラウザ）を更新し、更新したら true。 */
+  function recordPersonalBest(profit: number): boolean {
+    const prevRaw = lsGet("moshirasu.bestProfit");
+    const prev = prevRaw !== null ? Number(prevRaw) : Number.NEGATIVE_INFINITY;
+    const isNew = !Number.isNaN(prev) ? profit > prev : true;
+    if (isNew) lsSet("moshirasu.bestProfit", String(profit));
+    return Number.isFinite(prev) ? isNew : false; // 初回は「更新」表示しない
+  }
+
+  return { render, reset, showSetup, hideSetup };
+}
+
+// ---- localStorage / エスケープ（DOM側の小ユーティリティ）----
+function lsGet(key: string): string | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function lsSet(key: string, val: string): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(key, val);
+  } catch {
+    /* quota 等は無視 */
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+function escapeAttr(s: string): string {
+  return escapeHtml(s);
 }
 
 // ---- 純ヘルパー ----
@@ -608,4 +845,5 @@ const SHELL = `
 
 <div id="toast" class="toast"></div>
 <div id="result" class="result-overlay"></div>
+<div id="setup" class="setup-overlay"></div>
 `;
