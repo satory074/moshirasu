@@ -2,18 +2,27 @@
 
 /* ===== デザイントークン ===== */
 :root {
-  /* ライトテーマ: 灰緑のベース＋白い面を影で持ち上げて elevation を表現 */
-  --bg-top: #e9ece9; /* 灰緑のベース */
-  --bg-bottom: #e3e7e3;
-  --surface-1: #ffffff; /* パネル（hud / control / log）= 白で持ち上げ */
-  --surface-2: #ffffff; /* カード（table-card / wchip）= 白＋影 */
-  --surface-3: #eaefec; /* 操作要素ベース・ホバー面（白より少し沈む灰）*/
-  --border: #d7ded8;
-  --border-strong: #bcc7c0;
+  /* 温かい雀荘ライトテーマ: 生成り(クリーム)のベース＋木目フレーム＋フェルト緑の卓 */
+  --bg-top: #f3ece0; /* 生成り（クリーム紙）*/
+  --bg-bottom: #ece2d2;
+  --surface-1: #fffdf8; /* パネル（hud / control / sheet）= 暖かい白 */
+  --surface-2: #fffaf0; /* カード（wchip 等）= 暖かい白＋影 */
+  --surface-3: #f0e7d6; /* 操作要素ベース・ホバー面（沈んだ生成り）*/
+  --border: #e2d6c0; /* 木に馴染むタン色の境界 */
+  --border-strong: #cbb894;
+
+  /* 木目アクセント（フレーム・レール・店の縁）*/
+  --wood: #8a5a2b; /* ミドルウォルナット */
+  --wood-dark: #5e3a16;
+  --wood-light: #b07d44;
+
+  /* フェルト（卓面の主役色に昇格）*/
+  --felt: #1f8a5b; /* 麻雀卓のフェルト緑 */
+  --felt-bright: #25a06c; /* 中央の明るいハイライト */
+  --felt-dark: #14633f;
+  --felt-rim: #0e4a2f; /* クッションの影 */
 
   /* 意味色（卓レート/状態） */
-  --felt: #1c7a52; /* 麻雀卓のフェルト緑（アクセント） */
-  --felt-dark: #14633f;
   --blue: #2563eb; /* ブルー卓(点5) */
   --blue-bright: #2563eb; /* ボタン地用（白文字で十分なコントラスト）*/
   --blue-soft: #1e3a8a;
@@ -25,20 +34,30 @@
   --red: #dc2626; /* ラスハン・緊急 */
 
   /* テキスト */
-  --ink: #1f2937; /* 濃いグレー文字 */
-  --muted: #5b6b62; /* 副次テキスト（明背景で4.5:1）*/
+  --ink: #2a2118; /* 温かい黒に近いグレー */
+  --muted: #6b5d49; /* 副次テキスト（クリーム背景で約5:1）*/
 
-  /* 半径（3段階に統一）*/
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
+  /* 半径（丸めて柔らかく）*/
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+
+  /* 影（木の床に乗っている質感）*/
+  --shadow-card: 0 2px 6px rgba(94, 58, 22, 0.12), 0 8px 20px rgba(94, 58, 22, 0.06);
+  --shadow-felt: inset 0 0 0 4px var(--felt-rim), inset 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg-top);
+  background: radial-gradient(
+    120% 80% at 50% -10%,
+    #f7f1e6 0%,
+    var(--bg-top) 45%,
+    var(--bg-bottom) 100%
+  );
+  background-attachment: fixed;
   color: var(--ink);
   font-family:
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, -apple-system,
@@ -128,8 +147,172 @@ button:disabled {
 /* スクロールバー控えめに */
 .thin-scroll::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: var(--border-strong);
   border-radius: 4px;
+}
+
+/* ===== ジュース用 keyframes（render.ts の #fx-layer クローン演出が使用）===== */
+/* 来店ポップ（待ち客チップ・着席トークンの登場）*/
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateY(6px);
+  }
+  60% {
+    transform: scale(1.06) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.pop-in {
+  animation: pop-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 退店フェード（#fx-layer のクローンが消える）*/
+@keyframes fade-out {
+  from {
+    opacity: 0.95;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.9);
+  }
+}
+
+/* 激怒退店: 赤く揺れて消える */
+@keyframes rage-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px) rotate(-3deg);
+  }
+  40% {
+    transform: translateX(5px) rotate(3deg);
+  }
+  60% {
+    transform: translateX(-4px) rotate(-2deg);
+  }
+  80% {
+    transform: translateX(4px) rotate(2deg);
+  }
+}
+
+/* 浮かぶ +¥ / 精算ポップ（上昇しながらフェード）*/
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -6px) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -46px) scale(1);
+  }
+}
+
+/* 着席トークンが上から落ちて収まる */
+@keyframes seat-land {
+  0% {
+    transform: translateY(-12px) scale(0.7);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(2px) scale(1.08);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+.seat-land {
+  animation: seat-land 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 点棒の増減フラッシュ */
+@keyframes pts-up {
+  0% {
+    color: var(--ink);
+  }
+  30% {
+    color: #16a34a;
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes pts-down {
+  0% {
+    color: var(--ink);
+  }
+  30% {
+    color: var(--red);
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.pts-up {
+  animation: pts-up 0.5s ease-out;
+}
+.pts-down {
+  animation: pts-down 0.5s ease-out;
+}
+
+/* 評判バーの一瞬フラッシュ */
+@keyframes rep-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 0 3px currentColor;
+  }
+}
+
+/* のれん揺れ（来店時に暖簾が揺れる）*/
+@keyframes noren-sway {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-5deg);
+  }
+  75% {
+    transform: rotate(5deg);
+  }
+}
+
+/* 進行中の「時間が流れる」シマー（day-bar）*/
+@keyframes time-flow {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 24px 0;
+  }
+}
+
+/* OS のモーション低減設定を尊重（演出を実質無効化）*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

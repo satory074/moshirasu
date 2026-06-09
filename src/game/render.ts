@@ -33,7 +33,7 @@ import {
   patienceRatio,
   yen,
 } from "./selectors";
-import type { GameState, Pref, Rate, Seat, Table } from "./types";
+import type { Customer, GameState, Pref, Rate, Seat, Table } from "./types";
 
 /** UIから発行されるコマンド。 */
 export type Command =
@@ -61,6 +61,11 @@ interface UiState {
     | { mode: "seat" | "swap"; tableId: number; seatIdx: number }
     | { mode: "move"; customerId: number }
     | null;
+  // ---- 演出（ジュース）用の「前回値」メモリ。GameState には載らない transient。----
+  lastProfit: number | null; // 利益カウントアップの起点（null=初回/リセット直後）
+  lastRep: number | null; // 評判フラッシュ判定用
+  seenLogIds: Set<number>; // eventLog 差分でワンショット演出を発火するための既読集合
+  seatPts: Map<string, number>; // "tableId:seatIdx" -> 直近の点棒（増減フラッシュ用）
 }
 
 /** 開店前設定（ゲーム状態とは独立した transient UI 状態）。 */
@@ -78,7 +83,18 @@ interface RankingView {
 }
 
 export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
-  const ui: UiState = { selected: [], combineFirst: null, pickSeat: null, tutorialStep: null };
+  const ui: UiState = {
+    selected: [],
+    combineFirst: null,
+    pickSeat: null,
+    tutorialStep: null,
+    lastProfit: null,
+    lastRep: null,
+    seenLogIds: new Set<number>(),
+    seatPts: new Map<string, number>(),
+  };
+  let profitRaf = 0; // 利益カウントアップの rAF ハンドル（再開時にキャンセル）
+  let reducedCache: boolean | null = null; // prefers-reduced-motion を一度だけ評価
   const setupState: SetupState = { staffCount: CONFIG.staffCount };
   // 永続プロフィール（キャリア記録＋称号＋オンボーディング済みフラグ）。起動時に一度読む。
   let profile: PlayerProfile = loadProfile();
@@ -128,6 +144,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     result: must("#result"),
     setup: must("#setup"),
     tutorial: must("#tutorial"),
+    fxLayer: must("#fx-layer"),
   };
 
   function must(sel: string): HTMLElement {
@@ -299,6 +316,14 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     ui.selected = [];
     ui.combineFirst = null;
     ui.pickSeat = null;
+    // 演出メモリもリセット（新しい1日を初回扱いにし、古い演出を出さない）
+    ui.lastProfit = null;
+    ui.lastRep = null;
+    ui.seenLogIds.clear();
+    ui.seatPts.clear();
+    if (profitRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(profitRaf);
+    profitRaf = 0;
+    el.fxLayer.innerHTML = "";
     newAchievements = [];
     pickerEl?.remove();
     pickerEl = null;
@@ -423,6 +448,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   // ---- メイン描画 ----
   function render(state: GameState) {
     lastState = state;
+    const firstRender = ui.lastProfit === null; // リセット/初回は演出を出さず即時反映
 
     // 選択から離席済みを除去
     ui.selected = ui.selected.filter((id) => state.waiting.some((c) => c.id === id));
@@ -431,13 +457,30 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const k = kpis(state);
     el.clock.textContent = formatClock(state.clockMin);
     el.dayBar.style.width = `${(dayProgress(state) * 100).toFixed(1)}%`;
-    el.profit.textContent = yen(k.profit);
+    // 進行中は day-bar に「時間が流れる」シマーを出す
+    el.dayBar.classList.toggle("time-flow-on", !!state.advancing);
+
+    // 利益: カウントアップ＋増分の浮かぶ +¥（初回/低減時は即値）
+    if (firstRender) {
+      el.profit.textContent = yen(k.profit);
+    } else {
+      const delta = k.profit - (ui.lastProfit as number);
+      animateProfit(ui.lastProfit as number, k.profit);
+      if (delta > 0) spawnFloat(`+${yen(delta)}`, el.profit, "fx-yen");
+    }
     el.profit.style.color = k.profit >= 0 ? "var(--amber-ink)" : "var(--red)";
+
     el.revenue.textContent = yen(k.revenue);
     el.wages.textContent = `-${yen(k.wages)}`;
     el.repBar.style.width = `${state.reputation.toFixed(0)}%`;
     el.repBar.style.background = repColor(state.reputation);
     el.repText.textContent = `評判 ${Math.round(state.reputation)}`;
+    // 評判の増減を一瞬フラッシュ
+    if (!firstRender && ui.lastRep !== null && Math.round(state.reputation) !== Math.round(ui.lastRep)) {
+      flashRep(state.reputation > ui.lastRep);
+    }
+    ui.lastRep = state.reputation;
+
     el.kpiTables.textContent = `${k.tables}/${CONFIG.maxTables}`;
     el.kpiWaiting.textContent = String(k.waiting);
     el.kpiServed.textContent = String(k.served);
@@ -452,6 +495,127 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     renderLog(state);
     renderResult(state);
     renderPicker(state);
+    renderFx(state, firstRender);
+
+    ui.lastProfit = k.profit; // 次回カウントアップの起点
+  }
+
+  // ---- 演出（ジュース）ヘルパー。すべて render 層で完結し GameState に書き戻さない ----
+
+  /** prefers-reduced-motion を一度だけ評価してキャッシュ（jsdom では matchMedia 未定義＝false）。 */
+  function reduced(): boolean {
+    if (reducedCache === null) {
+      reducedCache =
+        typeof matchMedia === "function" &&
+        matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+    return reducedCache;
+  }
+
+  /** 利益のカウントアップ。最終値を先にセット（rAF が無い環境でも正しい）。 */
+  function animateProfit(from: number, to: number) {
+    el.profit.textContent = yen(to);
+    if (reduced() || from === to || typeof requestAnimationFrame !== "function") return;
+    if (profitRaf) cancelAnimationFrame(profitRaf);
+    const dur = 320;
+    let t0 = 0;
+    const step = (ts: number) => {
+      if (!t0) t0 = ts;
+      const p = Math.min(1, (ts - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.profit.textContent = yen(Math.round(from + (to - from) * eased));
+      if (p < 1) profitRaf = requestAnimationFrame(step);
+      else {
+        el.profit.textContent = yen(to);
+        profitRaf = 0;
+      }
+    };
+    profitRaf = requestAnimationFrame(step);
+  }
+
+  /** #fx-layer に浮かぶテキスト（+¥ / 半荘終了 等）を生成。アニメ終了 or タイムアウトで除去。 */
+  function spawnFloat(text: string, anchor: HTMLElement | null, cls = "") {
+    if (reduced() || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    if (!rect.width && !rect.height) return; // 未レイアウト（jsdom 等）はスキップ
+    const node = document.createElement("div");
+    node.className = `fx-float ${cls}`;
+    node.textContent = text;
+    node.style.left = `${rect.left + rect.width / 2}px`;
+    node.style.top = `${rect.top}px`;
+    el.fxLayer.appendChild(node);
+    const done = () => node.remove();
+    node.addEventListener("animationend", done);
+    setTimeout(done, 1300);
+  }
+
+  /** 退店ノードを #fx-layer 上のクローンとして見送りアニメ。実ノードは呼び出し側が同期 remove。 */
+  function fadeOutClone(node: HTMLElement, cls: string) {
+    if (reduced()) return;
+    const rect = node.getBoundingClientRect();
+    if (!rect.width && !rect.height) return; // jsdom 等では何もしない＝子数アサート不変
+    const clone = node.cloneNode(true) as HTMLElement;
+    clone.style.position = "fixed";
+    clone.style.left = `${rect.left}px`;
+    clone.style.top = `${rect.top}px`;
+    clone.style.width = `${rect.width}px`;
+    clone.style.margin = "0";
+    clone.style.pointerEvents = "none";
+    clone.classList.add(cls);
+    el.fxLayer.appendChild(clone);
+    const done = () => clone.remove();
+    clone.addEventListener("animationend", done);
+    setTimeout(done, 900);
+  }
+
+  /** 来店時に暖簾を揺らす（クラス付け替えでアニメ再開）。 */
+  function swayNoren() {
+    const noren = root.querySelector<HTMLElement>(".noren");
+    if (!noren) return;
+    noren.classList.remove("noren-swaying");
+    void noren.offsetWidth; // reflow でアニメを確実に再生
+    noren.classList.add("noren-swaying");
+  }
+
+  /** 評判バーを上昇=緑/下降=赤で一瞬フラッシュ。 */
+  function flashRep(up: boolean) {
+    el.repBar.classList.remove("rep-flash-up", "rep-flash-down");
+    void el.repBar.offsetWidth;
+    el.repBar.classList.add(up ? "rep-flash-up" : "rep-flash-down");
+  }
+
+  /** eventLog の id 差分で一回限りの演出を発火（renderLog と同じ差分パターン）。 */
+  function renderFx(state: GameState, firstRender: boolean) {
+    // 初回 or 低減設定: 既存ログを既読化するだけ（演出は出さない）
+    if (firstRender || reduced()) {
+      for (const e of state.eventLog) ui.seenLogIds.add(e.id);
+      return;
+    }
+    for (const e of state.eventLog) {
+      if (ui.seenLogIds.has(e.id)) continue;
+      ui.seenLogIds.add(e.id);
+      switch (e.kind) {
+        case "ARRIVAL":
+          swayNoren();
+          break;
+        case "SETTLE":
+          spawnFloat("🀄 半荘終了！", el.tables, "fx-settle");
+          break;
+        case "RAGE":
+          spawnFloat("😡 帰っちゃった", el.waiting, "fx-rage");
+          break;
+        case "BUST":
+          spawnFloat("💥 飛び！", el.tables, "fx-bust");
+          break;
+        default:
+          break;
+      }
+    }
+    // 既読集合が肥大化したら、ログ上限で消えた古い id を掃除
+    if (ui.seenLogIds.size > 400) {
+      const valid = new Set(state.eventLog.map((e) => e.id));
+      for (const id of ui.seenLogIds) if (!valid.has(id)) ui.seenLogIds.delete(id);
+    }
   }
 
   /** 空席/本走席クリックで開くアテンド・交代ピッカー。候補をクリックして実行。 */
@@ -630,54 +794,63 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     el.advanceBar.innerHTML = btn;
   }
 
+  // 「卓を立てる」を直接操作のコンテキスト操作バーに。待ち客選択→大きな2レートCTA。
   function renderControl(state: GameState) {
-    const n = ui.selected.length;
-    const names = ui.selected
-      .map((id) => state.waiting.find((c) => c.id === id)?.name ?? "")
-      .filter(Boolean)
-      .join("・");
-    const step1Active = n === 0;
-    const step2Active = n > 0;
-    // 待ち客がいるのに未選択なら、最初の操作（①）に注意を促す
-    const attention = n === 0 && state.waiting.length > 0 ? "step-attention" : "";
+    const sel = ui.selected
+      .map((id) => state.waiting.find((c) => c.id === id))
+      .filter((c): c is Customer => !!c);
+    const n = sel.length;
+
+    if (n === 0) {
+      el.control.className = "control control-idle";
+      el.control.innerHTML =
+        state.waiting.length > 0
+          ? `<div class="ctl-prompt"><span class="ctl-prompt-emoji">👆</span>のれんの<b>待ち客をタップ</b>して選ぶと卓を立てられます（最大4人）</div>`
+          : `<div class="ctl-prompt ctl-prompt-dim">待ち客が来たら、タップで選んで卓を立てましょう</div>`;
+      return;
+    }
+
+    const blueOk = sel.every((c) => prefAllowsRate(c.pref, "BLUE"));
+    const greenOk = sel.every((c) => prefAllowsRate(c.pref, "GREEN"));
+    const avatars = sel.map((c) => `<span class="ctl-ava">${c.emoji}</span>`).join("");
+    el.control.className = "control control-active";
     el.control.innerHTML = `
-      <div class="ctl-title">卓を立てる</div>
-      <div class="ctl-step ${step1Active ? "step-active" : ""} ${attention}">
-        <div class="step-num">1</div>
-        <div class="step-body">
-          <div class="step-label">待ち客をタップで選択（最大4人）</div>
-          <div class="step-sel">${n > 0 ? `選択中(${n}/4): ${names}` : ""}</div>
-        </div>
+      <div class="ctl-sel">
+        <span class="ctl-sel-avatars">${avatars}</span>
+        <span class="ctl-sel-label"><b>${n}人</b>を案内 — レートを選んで卓を立てる</span>
       </div>
-      <div class="ctl-step ${step2Active ? "step-active" : ""}">
-        <div class="step-num">2</div>
-        <div class="step-body">
-          <div class="step-label">卓のレートを選ぶ</div>
-          <div class="ctl-btns">
-            <button data-action="open-table" data-rate="BLUE" class="btn btn-blue" ${n === 0 ? `disabled title="先に待ち客を選択してください"` : ""}>🔵 ブルー卓(点5)で立てる</button>
-            <button data-action="open-table" data-rate="GREEN" class="btn btn-green" ${n === 0 ? `disabled title="先に待ち客を選択してください"` : ""}>🟢 グリーン卓(点3)で立てる</button>
-          </div>
-        </div>
+      <div class="ctl-cta">
+        <button data-action="open-table" data-rate="BLUE" class="btn btn-blue ctl-rate ${blueOk ? "" : "ctl-rate-bad"}">
+          <span class="ctl-rate-top">🔵 点5（ブルー）</span>
+          <span class="ctl-rate-sub">場代 ${yen(CONFIG.gameFeeYen.BLUE)}/半荘${blueOk ? "" : "・希望外あり"}</span>
+        </button>
+        <button data-action="open-table" data-rate="GREEN" class="btn btn-green ctl-rate ${greenOk ? "" : "ctl-rate-bad"}">
+          <span class="ctl-rate-top">🟢 点3（グリーン）</span>
+          <span class="ctl-rate-sub">場代 ${yen(CONFIG.gameFeeYen.GREEN)}/半荘${greenOk ? "" : "・希望外あり"}</span>
+        </button>
       </div>
-      <div class="ctl-hint">3人以下でも立てて「本走」で店員を入れれば対局できます。点5は場代${yen(CONFIG.gameFeeYen.BLUE)}/半荘、点3は${yen(CONFIG.gameFeeYen.GREEN)}/半荘。</div>
-    `;
+      <div class="ctl-foot">3人以下でも立てて、空席は<b>本走（店員）</b>で埋められます</div>`;
   }
 
   function renderTables(state: GameState) {
     const ids = new Set(state.tables.map((t) => t.id));
-    // 削除
+    // 削除（撤去された卓は #fx-layer 上のクローンで見送りアニメ。実ノードは同期 remove）
     for (const [id, node] of tableCards) {
       if (!ids.has(id)) {
+        fadeOutClone(node, "fx-leave");
         node.remove();
         tableCards.delete(id);
       }
     }
-    if (state.tables.length === 0) {
-      el.tables.querySelector(".empty-hint")?.remove();
+    // ゴースト「＋卓」タイルは毎回作り直す（末尾に置くため先に除去）
+    el.tables.querySelector(".ghost-table")?.remove();
+
+    // 卓も選択も無いときだけ空ヒント。選択中はゴーストタイルが誘導する。
+    if (state.tables.length === 0 && ui.selected.length === 0) {
       if (!el.tables.querySelector(".empty-hint")) {
         const hint = document.createElement("div");
         hint.className = "empty-hint";
-        hint.textContent = "まだ卓がありません。待ち客が集まったら卓を立てましょう。";
+        hint.textContent = "まだ卓がありません。のれんの待ち客を選んで卓を立てましょう。";
         el.tables.appendChild(hint);
       }
     } else {
@@ -686,6 +859,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
 
     state.tables.forEach((t, idx) => {
       let card = tableCards.get(t.id);
+      const isNew = !card;
       if (!card) {
         card = document.createElement("div");
         card.dataset.tableCard = String(t.id);
@@ -695,9 +869,24 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       }
       // 並び順を維持
       if (el.tables.children[idx] !== card) el.tables.appendChild(card);
-      card.className = `table-card ${t.rate === "BLUE" ? "tc-blue" : "tc-green"}`;
+      card.className = `table-card ${t.rate === "BLUE" ? "tc-blue" : "tc-green"}${isNew && !reduced() ? " pop-in" : ""}`;
       updateTableCard(card, state, t, idx + 1);
     });
+
+    // 選択中はフロア末尾にゴースト「＋卓」タイル（空間的に「置く」第2導線）。
+    if (ui.selected.length > 0) {
+      const sel = ui.selected
+        .map((id) => state.waiting.find((c) => c.id === id))
+        .filter((c): c is Customer => !!c);
+      const greenOnly = sel.length > 0 && sel.every((c) => c.pref === "GREEN");
+      const bestRate: Rate = greenOnly ? "GREEN" : "BLUE";
+      const ghost = document.createElement("button");
+      ghost.className = "ghost-table";
+      ghost.dataset.action = "open-table";
+      ghost.dataset.rate = bestRate;
+      ghost.innerHTML = `<span class="ghost-plus">＋</span><span class="ghost-label">${ui.selected.length}人で卓を立てる</span>`;
+      el.tables.appendChild(ghost);
+    }
   }
 
   function updateTableCard(card: HTMLElement, state: GameState, t: Table, no: number) {
@@ -708,7 +897,6 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     thead.innerHTML = `
       <span class="tc-no">卓#${no}</span>
       <span class="tc-rate">${t.rate === "BLUE" ? "🔵 点5" : "🟢 点3"}</span>
-      <span class="tc-status">${statusLabel(t)}</span>
       <span class="tc-count">${t.progress.hanchanCount}半荘</span>`;
     bar.style.width = `${(hanchanProgress(t) * 100).toFixed(1)}%`;
     bar.style.background = t.rate === "BLUE" ? "var(--blue)" : "var(--green)";
@@ -748,7 +936,11 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
       hint = `<div class="tc-hint tc-hint-time">⏳ 東場のうちだけ本走席クリックで待ち客に交代できます</div>`;
     }
 
-    tbody.innerHTML = `<div class="seats">${seatsHtml}</div>${hint}<div class="tc-actions">${btns.join("")}</div>`;
+    // 卓の中央（フェルトの中心）に現在の状態（局/精算中/まもなく開始）を表示。
+    const center = `<div class="seat-center"><span class="tc-center-status">${statusLabel(t)}</span>${
+      t.progress.honba > 0 ? `<span class="tc-honba">${t.progress.honba}本場</span>` : ""
+    }</div>`;
+    tbody.innerHTML = `<div class="seats">${seatsHtml}${center}</div>${hint}<div class="tc-actions">${btns.join("")}</div>`;
   }
 
   function seatHtml(
@@ -759,54 +951,77 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     waitingStart = false,
     canSwap = false,
   ): string {
-    if (s.occupant.kind === "EMPTY") {
-      // 開始待ちの空席はクリックでアテンドピッカーを開く。
-      return waitingStart
-        ? `<div class="seat seat-empty seat-pick" data-action="pick-seat" data-id="${t.id}" data-seat="${seatIdx}">＋ 空席<small>クリックで案内</small></div>`
-        : `<div class="seat seat-empty">空席</div>`;
+    const pos = `seat-pos-${seatIdx}`;
+    // 点棒の増減・新規着席を検出してワンショット演出のクラスを決める（GameState は不変）。
+    const key = `${t.id}:${seatIdx}`;
+    const occupied = s.occupant.kind !== "EMPTY";
+    const fxOn = !reduced() && ui.lastProfit !== null; // 初回/低減時は演出なし
+    const prev = ui.seatPts.get(key);
+    let landCls = "";
+    let ptsFlash = "";
+    if (occupied) {
+      if (prev === undefined && fxOn) landCls = " seat-land";
+      else if (prev !== undefined && fxOn && s.points !== prev)
+        ptsFlash = s.points > prev ? " pts-up" : " pts-down";
+      ui.seatPts.set(key, s.points);
+    } else {
+      ui.seatPts.delete(key);
     }
-    const dealer = s.isDealer ? `<span class="seat-dealer" title="親">親</span>` : "";
-    const pts = `<div class="seat-pts">${s.points.toLocaleString()}点</div>`;
-    if (s.occupant.kind === "STAFF") {
-      const st = state.staff.find((x) => x.id === (s.occupant as { staffId: number }).staffId);
-      // 交代可能なら本走席クリックで交代ピッカーを開く。
-      const swapAttr = canSwap
-        ? ` seat-swap" data-action="pick-swap" data-id="${t.id}" data-seat="${seatIdx}"`
-        : `"`;
-      const swapHint = canSwap ? `<div class="seat-swaphint">🔁 クリックで交代</div>` : "";
-      return `<div class="seat seat-staff${swapAttr}>
-        <div class="seat-name">🧑‍💼 ${st?.name ?? "店員"}${dealer}</div>
-        <div class="seat-badge">本走</div>
-        ${pts}
-        ${swapHint}
+
+    // 空席（開始待ちならクリックでアテンドピッカー）
+    if (s.occupant.kind === "EMPTY") {
+      const cls = `seat seat-empty ${pos}${waitingStart ? " seat-pick" : ""}`;
+      const attr = waitingStart
+        ? ` data-action="pick-seat" data-id="${t.id}" data-seat="${seatIdx}"`
+        : "";
+      return `<div class="${cls}"${attr}>
+        <span class="seat-ava seat-ava-empty">＋</span>
+        <span class="seat-sub">${waitingStart ? "案内" : "空席"}</span>
       </div>`;
     }
+
+    const dealer = s.isDealer ? `<span class="seat-dealer" title="親">親</span>` : "";
+    const ptsLine = `<span class="seat-pts${ptsFlash}">${s.points.toLocaleString()}</span>`;
+
+    // 本走（店員）。交代可能なら本走席クリックで交代ピッカー。
+    if (s.occupant.kind === "STAFF") {
+      const st = state.staff.find((x) => x.id === (s.occupant as { staffId: number }).staffId);
+      const cls = `seat seat-staff ${pos}${canSwap ? " seat-swap" : ""}`;
+      const attr = canSwap
+        ? ` data-action="pick-swap" data-id="${t.id}" data-seat="${seatIdx}"`
+        : "";
+      return `<div class="${cls}"${attr}>
+        <span class="seat-ava ring-staff${landCls}">🧑‍💼<span class="seat-badge">本走</span></span>
+        <span class="seat-name">${st?.name ?? "店員"}${dealer}</span>
+        ${ptsLine}
+        ${canSwap ? `<span class="seat-hint">🔁 交代</span>` : ""}
+      </div>`;
+    }
+
+    // 客。希望でリング色、低資金で💸、コールはトークン上のピップ。
     const c = state.customers.get(s.occupant.customerId);
-    if (!c) return `<div class="seat seat-empty">空席</div>`;
-    const call = s.call
+    if (!c) return `<div class="seat seat-empty ${pos}"><span class="seat-ava seat-ava-empty">＋</span></div>`;
+    const ring = c.pref === "BLUE" ? "ring-blue" : c.pref === "GREEN" ? "ring-green" : "ring-any";
+    const lowToken = c.bankroll <= c.startBankroll * 0.3;
+    const callPip = s.call
       ? `<span class="call ${s.call === "LASTHAN" ? "call-last" : "call-mosh"}" title="${s.call === "LASTHAN" ? "ラスハン（この半荘で最後）" : "モシラス（続けるかも）"}">${s.call === "LASTHAN" ? "L" : "M"}</span>`
       : "";
-    const low = c.bankroll <= c.startBankroll * 0.3 ? "seat-low" : "";
-    // 入店時の希望（着席後も分かるように常時表示）。
-    const prefBadge = prefBadgeHtml(c.pref);
-    // 開始待ち（半荘前）は「開始待ち」時間を表示。我慢ゲージ比で色付け。
+    const lowBadge = lowToken ? `<span class="seat-low-badge" title="資金わずか">💸</span>` : "";
     let waitLine = "";
+    let urgentCls = "";
     if (waitingStart) {
       const pr = patienceRatio(c);
-      waitLine = `<div class="seat-wait ${pr > 0.75 ? "seat-wait-urgent" : ""}">開始待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</div>`;
+      if (pr > 0.75) urgentCls = " seat-urgent";
+      waitLine = `<span class="seat-wait ${pr > 0.75 ? "seat-wait-urgent" : ""}">待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</span>`;
     }
-    // 開始待ち（席埋め中）の客はクリックで別卓へ移動できる。対局中はクリック不可。
-    const moveAttr = waitingStart
-      ? ` seat-move" data-action="pick-move" data-id="${c.id}"`
-      : `"`;
-    const moveHint = waitingStart ? `<div class="seat-swaphint">↪️ クリックで移動</div>` : "";
-    return `<div class="seat seat-cust ${low}${moveAttr}>
-      <div class="seat-name">${c.emoji} ${c.name}${dealer} ${prefBadge}</div>
-      <div class="seat-meta">${yen(c.bankroll)}</div>
-      ${pts}
+    const cls = `seat seat-cust ${pos}${lowToken ? " seat-low" : ""}${urgentCls}${waitingStart ? " seat-move" : ""}`;
+    const attr = waitingStart ? ` data-action="pick-move" data-id="${c.id}"` : "";
+    return `<div class="${cls}"${attr}>
+      <span class="seat-ava ${ring}${lowToken ? " token-low" : ""}${landCls}">${c.emoji}${callPip}${lowBadge}</span>
+      <span class="seat-name">${c.name}${dealer}</span>
+      ${ptsLine}
       ${waitLine}
-      ${call}
-      ${moveHint}
+      ${waitingStart ? `<span class="seat-hint">↪️ 移動</span>` : ""}
     </div>`;
   }
 
@@ -814,6 +1029,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const ids = new Set(state.waiting.map((c) => c.id));
     for (const [id, node] of waitChips) {
       if (!ids.has(id)) {
+        // 退店（着席ではなく帰った）客は #fx-layer 上のクローンで見送る。実ノードは同期 remove。
+        const c = state.customers.get(id);
+        if (!c || c.status === "LEFT") fadeOutClone(node, "fx-leave");
         node.remove();
         waitChips.delete(id);
       }
@@ -825,6 +1043,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         chip.dataset.action = "select-customer";
         chip.dataset.id = String(c.id);
         chip.innerHTML = `<div class="wbody"></div><div class="track"><div class="bar-fill" data-patience></div></div>`;
+        if (!reduced()) chip.classList.add("pop-in"); // 来店ポップ
         waitChips.set(c.id, chip);
         el.waiting.appendChild(chip);
       }
@@ -832,24 +1051,28 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
 
       const selected = ui.selected.includes(c.id);
       const pr = patienceRatio(c);
-      chip.className = `wchip ${selected ? "selected-ring" : ""} ${pr > 0.75 ? "wchip-urgent" : ""}`;
+      const ring = c.pref === "BLUE" ? "ring-blue" : c.pref === "GREEN" ? "ring-green" : "ring-any";
+      const lowToken = c.bankroll <= c.startBankroll * 0.3;
+      chip.className = `wchip ${selected ? "selected-ring" : ""} ${pr > 0.75 ? "wchip-urgent" : ""} ${lowToken ? "wchip-low" : ""}`;
       const prefBadge = prefBadgeHtml(c.pref);
       const leaveIn = minsUntilLeave(state, c);
-      const check = selected ? `<span class="w-check">✓</span> ` : "";
       const urgentBadge = pr > 0.75 ? `<span class="w-urgent-badge">急</span>` : "";
+      const check = selected ? `<span class="wcheck">✓</span>` : "";
+      const lowBadge = lowToken ? `<span class="wlow" title="資金わずか">💸</span>` : "";
       chip.querySelector<HTMLElement>(".wbody")!.innerHTML = `
-        <div class="w-top">${check}${c.emoji} <span class="w-name">${c.name}</span>${urgentBadge} ${prefBadge}</div>
-        <div class="w-meta">資金${yen(c.bankroll)}・帰宅まで${leaveIn}分</div>
-        <div class="w-wait ${pr > 0.75 ? "pulse-warn" : ""}">待ち ${Math.round(c.waitedMin)}/${c.patienceMin}分</div>`;
+        <span class="wava ${ring}${lowToken ? " token-low" : ""}${pr > 0.75 ? " wava-urgent" : ""}">${c.emoji}${check}${lowBadge}</span>
+        <span class="w-name">${c.name}</span>
+        <span class="w-tags">${prefBadge}${urgentBadge}</span>
+        <span class="w-meta">${yen(c.bankroll)}・帰宅${leaveIn}分</span>`;
       const pbar = chip.querySelector<HTMLElement>("[data-patience]")!;
       pbar.style.width = `${(pr * 100).toFixed(1)}%`;
-      pbar.style.background = pr > 0.75 ? "var(--red)" : pr > 0.45 ? "var(--amber)" : "#64748b";
+      pbar.style.background = pr > 0.75 ? "var(--red)" : pr > 0.45 ? "var(--amber)" : "#9aa89c";
     });
     if (state.waiting.length === 0) {
       if (!el.waiting.querySelector(".empty-hint")) {
         const hint = document.createElement("div");
         hint.className = "empty-hint small";
-        hint.textContent = "待ち客なし";
+        hint.textContent = "暖簾の外は静か…次の来店を待とう";
         el.waiting.appendChild(hint);
       }
     } else {
@@ -1138,54 +1361,66 @@ const TUTORIAL_SLIDES: { emoji: string; title: string; body: string }[] = [
 ];
 
 // ---- 骨格マークアップ ----
+// スマホ縦持ち前提の1シーン: HUDリボン → 暖簾の行列 → フロア。
+// ログはスライドアップのボトムシート、進行は下部固定CTA。
 const SHELL = `
-<div class="hud">
-  <div class="hud-left">
-    <div class="clock-wrap"><span class="clock-label">店内時刻</span><span id="clock" class="clock">12:00</span></div>
+<div class="game-stage">
+  <header id="hud" class="hud">
+    <div class="hud-top">
+      <div class="hud-clock">
+        <span class="clock-label">店内時刻</span>
+        <span id="clock" class="clock">17:00</span>
+      </div>
+      <div class="hud-profit">
+        <span class="rev-label">利益</span>
+        <span id="profit" class="rev">¥0</span>
+      </div>
+      <div id="advance-wrap" class="advance-wrap"></div>
+    </div>
     <div class="day-track"><div id="day-bar" class="bar-fill day-bar"></div></div>
-  </div>
-  <div class="hud-mid">
-    <div class="rev-wrap"><span class="rev-label">利益</span><span id="profit" class="rev">¥0</span></div>
-    <div class="rev-sub">
-      <span>売上 <b id="revenue">¥0</b></span>
-      <span>人件費 <b id="wages" class="bad">-¥0</b></span>
+    <div class="hud-sub">
+      <div class="rev-sub">
+        <span>売上 <b id="revenue">¥0</b></span>
+        <span>人件費 <b id="wages" class="bad">-¥0</b></span>
+      </div>
+      <div class="rep-wrap">
+        <div id="rep-text" class="rep-text">評判 70</div>
+        <div class="rep-track"><div id="rep-bar" class="bar-fill rep-bar"></div></div>
+      </div>
     </div>
-    <div class="rep-wrap">
-      <div id="rep-text" class="rep-text">評判 70</div>
-      <div class="rep-track"><div id="rep-bar" class="bar-fill rep-bar"></div></div>
-    </div>
-  </div>
-  <div class="hud-right">
     <div class="kpis">
-      <div class="kpi"><span>卓</span><b id="kpi-tables">0/4</b></div>
-      <div class="kpi"><span>待ち</span><b id="kpi-waiting">0</b></div>
-      <div class="kpi"><span>接客</span><b id="kpi-served">0</b></div>
-      <div class="kpi"><span>平均待ち</span><b id="kpi-avgwait">0分</b></div>
+      <div class="kpi"><b id="kpi-tables">0/8</b><span>卓</span></div>
+      <div class="kpi"><b id="kpi-waiting">0</b><span>待ち</span></div>
+      <div class="kpi"><b id="kpi-served">0</b><span>接客</span></div>
+      <div class="kpi"><b id="kpi-avgwait">0分</b><span>平均待ち</span></div>
     </div>
-    <div id="advance-wrap" class="advance-wrap"></div>
-  </div>
-</div>
+  </header>
 
-<div class="main">
-  <section class="col col-tables">
-    <h2 class="col-h">卓（フロア）</h2>
+  <section class="door">
+    <h2 class="door-head"><span class="noren" aria-hidden="true">のれん</span><span class="door-title">待ち客</span> <span id="waiting-count" class="badge">0</span></h2>
+    <div id="waiting" class="waiting door-queue thin-scroll"></div>
+  </section>
+
+  <section class="floor">
     <div id="staff" class="staff-card"></div>
     <div id="control" class="control"></div>
     <div id="tables" class="tables"></div>
   </section>
-  <section class="col col-waiting">
-    <h2 class="col-h">待ち客 <span id="waiting-count" class="badge">0</span></h2>
-    <div id="waiting" class="waiting thin-scroll"></div>
-  </section>
-  <section class="col col-log">
-    <input type="checkbox" id="log-toggle" class="log-toggle-cb" />
-    <label for="log-toggle" class="col-h log-toggle">イベントログ <span class="log-caret">▾</span></label>
+</div>
+
+<input type="checkbox" id="log-toggle" class="log-toggle-cb" />
+<label for="log-toggle" class="log-fab" aria-label="イベントログを開く">📜</label>
+<div class="log-sheet">
+  <label for="log-toggle" class="log-sheet-scrim" aria-hidden="true"></label>
+  <div class="log-sheet-panel">
+    <label for="log-toggle" class="log-sheet-head">イベントログ <span class="log-caret">▾</span></label>
     <div id="log" class="log thin-scroll"></div>
-  </section>
+  </div>
 </div>
 
 <div id="advance-bar" class="advance-bar"></div>
 
+<div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
 <div id="toast" class="toast"></div>
 <div id="result" class="result-overlay"></div>
 <div id="setup" class="setup-overlay"></div>
