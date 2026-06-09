@@ -78,12 +78,12 @@ import "../styles/globals.css";
         position: sticky;
         top: 0;
         z-index: 30;
-        background: linear-gradient(180deg, var(--surface-1), #fbf6ec);
-        border: 1px solid var(--border-strong);
-        border-radius: 18px;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-radius: 16px;
         padding: 0.6rem 0.8rem;
         box-shadow: var(--shadow-card);
-        margin-bottom: 0.7rem;
+        margin-bottom: 0.9rem;
       }
       .hud-top {
         display: flex;
@@ -181,26 +181,27 @@ import "../styles/globals.css";
         color: var(--red);
         animation: rep-flash 0.5s ease-out;
       }
+      /* 副次KPI: タイル箱をやめて軽いインライン統計行に降格 */
       .kpis {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 0.4rem;
-        margin-top: 0.5rem;
+        margin-top: 0.55rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
       }
       .kpi {
         display: flex;
         flex-direction: column;
         align-items: center;
-        background: var(--surface-3);
-        border-radius: 10px;
-        padding: 0.3rem 0.2rem;
       }
       .kpi b {
-        font-size: 0.95rem;
+        font-size: var(--fs-md);
         font-variant-numeric: tabular-nums;
+        color: var(--ink);
       }
       .kpi span {
-        font-size: 0.58rem;
+        font-size: var(--fs-xs);
         color: var(--muted);
       }
 
@@ -295,21 +296,9 @@ import "../styles/globals.css";
       .wava-urgent {
         animation: pulse-warn 0.9s ease-in-out infinite;
       }
+      /* 選択は wchip 自体の枠/塗り(.selected-ring)で表現するためチェックbadgeは非表示 */
       .wcheck {
-        position: absolute;
-        top: -4px;
-        right: -4px;
-        width: 1.15rem;
-        height: 1.15rem;
-        border-radius: 50%;
-        background: var(--amber);
-        color: #1a1206;
-        font-size: 0.72rem;
-        font-weight: 900;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        display: none;
       }
       .wlow {
         position: absolute;
@@ -365,9 +354,7 @@ import "../styles/globals.css";
         border-color: #a78bfa;
         background: #f4f0ff;
       }
-      .token-low {
-        filter: grayscale(0.45);
-      }
+      /* 低資金は 💸 バッジ1つで示す（グレースケールは希望リング色を濁すため不使用）*/
 
       .pref {
         font-size: 0.56rem;
@@ -577,14 +564,14 @@ import "../styles/globals.css";
       .btn-advance:not(:disabled)::after {
         content: "";
         position: absolute;
-        top: -4px;
-        right: -4px;
-        width: 11px;
-        height: 11px;
+        top: -3px;
+        right: -3px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
-        background: #ef4444; /* 通知レッド（緊急客の border パルスとは別形状なので区別可） */
-        border: 2px solid #fff; /* フェルト緑/青/緑ボタン上でも視認できる白フチ */
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+        background: var(--red); /* 操作可能ドット（彩度控えめの赤。全背景で視認、緊急客の赤パルスとは形で区別）*/
+        border: 1.5px solid #fff; /* フェルト緑/青/緑ボタン上でも視認できる白フチ */
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
         pointer-events: none; /* クリックを邪魔しない */
         z-index: 5;
       }
@@ -602,32 +589,28 @@ import "../styles/globals.css";
       }
       .table-card {
         position: relative;
-        background: radial-gradient(
-          120% 120% at 50% 35%,
-          var(--felt-bright) 0%,
-          var(--felt) 55%,
-          var(--felt-dark) 100%
-        );
+        background: linear-gradient(160deg, var(--felt-bright), var(--felt) 70%);
         border: none;
-        border-radius: 20px;
+        border-radius: 18px;
         padding: 0.7rem 0.7rem 0.85rem;
-        box-shadow: var(--shadow-felt), 0 6px 14px rgba(94, 58, 22, 0.28);
+        box-shadow: var(--shadow-felt), 0 3px 8px rgba(94, 58, 22, 0.16);
         color: #eafff4;
       }
+      /* 木製トレイの気配だけ残す細枠 */
       .table-card::before {
         content: "";
         position: absolute;
-        inset: -7px;
+        inset: -3px;
         z-index: -1;
-        border-radius: 26px;
-        background: linear-gradient(160deg, var(--wood-light), var(--wood) 60%, var(--wood-dark));
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+        border-radius: 21px;
+        background: var(--wood);
+        opacity: 0.7;
       }
       .tc-blue {
-        box-shadow: var(--shadow-felt), 0 0 0 3px var(--blue), 0 6px 14px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-felt), 0 0 0 2px var(--blue), 0 3px 8px rgba(0, 0, 0, 0.16);
       }
       .tc-green {
-        box-shadow: var(--shadow-felt), 0 0 0 3px var(--green), 0 6px 14px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-felt), 0 0 0 2px var(--green), 0 3px 8px rgba(0, 0, 0, 0.16);
       }
       .thead {
         display: flex;

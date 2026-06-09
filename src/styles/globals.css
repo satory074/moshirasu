@@ -16,11 +16,11 @@
   --wood-dark: #5e3a16;
   --wood-light: #b07d44;
 
-  /* フェルト（卓面の主役色に昇格）*/
-  --felt: #1f8a5b; /* 麻雀卓のフェルト緑 */
-  --felt-bright: #25a06c; /* 中央の明るいハイライト */
-  --felt-dark: #14633f;
-  --felt-rim: #0e4a2f; /* クッションの影 */
+  /* フェルト（卓面の主役色。彩度を落とした落ち着いたセージ緑）*/
+  --felt: #3f7d5f; /* くすませた麻雀卓のフェルト緑 */
+  --felt-bright: #4c8e6c; /* 中央のゆるいハイライト */
+  --felt-dark: #2f5f48;
+  --felt-rim: #294f3c; /* クッションの影（控えめ）*/
 
   /* 意味色（卓レート/状態） */
   --blue: #2563eb; /* ブルー卓(点5) */
@@ -42,9 +42,15 @@
   --r-md: 16px;
   --r-lg: 22px;
 
-  /* 影（木の床に乗っている質感）*/
-  --shadow-card: 0 2px 6px rgba(94, 58, 22, 0.12), 0 8px 20px rgba(94, 58, 22, 0.06);
-  --shadow-felt: inset 0 0 0 4px var(--felt-rim), inset 0 2px 10px rgba(0, 0, 0, 0.25);
+  /* タイポスケール（散在サイズをこの数段に寄せる）*/
+  --fs-xs: 0.62rem; /* 補助ラベル */
+  --fs-sm: 0.72rem; /* 通常の副次テキスト */
+  --fs-md: 0.84rem; /* 見出し小・本文 */
+  --fs-lg: 1rem; /* 見出し */
+
+  /* 影（木の床に乗っている質感。一段控えめに）*/
+  --shadow-card: 0 1px 4px rgba(94, 58, 22, 0.10);
+  --shadow-felt: inset 0 0 0 3px var(--felt-rim), inset 0 1px 5px rgba(0, 0, 0, 0.16);
 }
 
 html,
@@ -221,14 +227,11 @@ button:disabled {
   }
 }
 
-/* 着席トークンが上から落ちて収まる */
+/* 着席トークンの登場（跳ね返しを抑えた穏やかなフェードイン）*/
 @keyframes seat-land {
   0% {
-    transform: translateY(-12px) scale(0.7);
+    transform: translateY(-6px) scale(0.9);
     opacity: 0;
-  }
-  70% {
-    transform: translateY(2px) scale(1.08);
   }
   100% {
     transform: translateY(0) scale(1);
@@ -236,7 +239,7 @@ button:disabled {
   }
 }
 .seat-land {
-  animation: seat-land 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: seat-land 0.26s ease-out;
 }
 
 /* 点棒の増減フラッシュ */
@@ -279,30 +282,6 @@ button:disabled {
   }
   50% {
     box-shadow: 0 0 0 3px currentColor;
-  }
-}
-
-/* のれん揺れ（来店時に暖簾が揺れる）*/
-@keyframes noren-sway {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  25% {
-    transform: rotate(-5deg);
-  }
-  75% {
-    transform: rotate(5deg);
-  }
-}
-
-/* 進行中の「時間が流れる」シマー（day-bar）*/
-@keyframes time-flow {
-  0% {
-    background-position: 0 0;
-  }
-  100% {
-    background-position: 24px 0;
   }
 }
 
