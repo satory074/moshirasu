@@ -555,6 +555,45 @@ import "../styles/globals.css";
         box-shadow: 0 3px 9px rgba(94, 58, 22, 0.3);
       }
 
+      /* ===== 操作可能アフォーダンス: 今押せる要素の角に赤い丸 ===== */
+      /* 対象クラスは「操作できるときだけ」付与されるので、赤丸もそれに同期して出入りする。 */
+      .seat-pick,
+      .seat-swap,
+      .seat-move,
+      .ctl-rate,
+      .ghost-table,
+      .mini,
+      .wchip,
+      .btn-advance:not(:disabled) {
+        position: relative; /* 角バッジの基準。既に relative の要素でも無害 */
+      }
+      .seat-pick::after,
+      .seat-swap::after,
+      .seat-move::after,
+      .ctl-rate::after,
+      .ghost-table::after,
+      .mini::after,
+      .wchip::after,
+      .btn-advance:not(:disabled)::after {
+        content: "";
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #ef4444; /* 通知レッド（緊急客の border パルスとは別形状なので区別可） */
+        border: 2px solid #fff; /* フェルト緑/青/緑ボタン上でも視認できる白フチ */
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+        pointer-events: none; /* クリックを邪魔しない */
+        z-index: 5;
+      }
+      /* 待ち客チップは .door-queue が overflow-y:hidden なので、はみ出さずチップ内角に置く */
+      .wchip::after {
+        top: 6px;
+        right: 6px;
+      }
+
       /* ===== 卓（フェルト卓＋四方のアバター駒）===== */
       .tables {
         display: grid;
