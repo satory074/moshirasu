@@ -1391,7 +1391,7 @@ const TUTORIAL_SLIDES: { emoji: string; title: string; body: string }[] = [
   {
     emoji: "🔵",
     title: "点5は怖いが稼げる",
-    body: `<b>点5(ブルー)</b>＝場代${yen(CONFIG.gameFeeYen.BLUE)}/半荘で大きく稼げるが、手が大きく振れて<b>薄財布の客が飛ぶ</b>（評判が下がる）。<b>点3(グリーン)</b>＝場代${yen(CONFIG.gameFeeYen.GREEN)}/半荘で安全。コツは<b>厚財布の客を点5へ、薄い客は点3へ</b>。「どちらでも」の客の振り分けが腕の見せ所です。`,
+    body: `<b>点5(ブルー)</b>＝場代${yen(CONFIG.gameFeeYen.BLUE)}/半荘で大きく稼げるが、高レートで<b>お金の動きが大きく</b>、負けが込むと<b>薄財布の客が飛ぶ</b>（評判が下がる）。<b>点3(グリーン)</b>＝場代${yen(CONFIG.gameFeeYen.GREEN)}/半荘で安全。コツは<b>厚財布の客を点5へ、薄い客は点3へ</b>。「どちらでも」の客の振り分けが腕の見せ所です。`,
   },
   {
     emoji: "🔁",

@@ -66,6 +66,24 @@ import type { GameState, Rate } from "../src/game/types";
   if (maxAbsSum > 5) throw new Error("settlement not zero-sum");
 }
 
+// ---- 1b) 役（和了点）分布が実データに整合（依頼: 実分布を点棒に反映）----
+// handValues は子のロン基準点。engine が親×1.5・ツモ分割を別途適用するので realized≈子基準×~1.14。
+// 実データ（天鳳・鳳凰卓赤あり）: 平均和了点~5,647・満貫以上~15-20%。
+{
+  const hv = CONFIG.kyoku.handValues;
+  const totW = hv.reduce((a, [, w]) => a + w, 0);
+  const avg = hv.reduce((a, [v, w]) => a + v * w, 0) / totW;
+  const manganPlus = hv.filter(([v]) => v >= 8000).reduce((a, [, w]) => a + w, 0) / totW;
+  const realized = avg * 1.14;
+  console.log(
+    `[hand-dist] 子基準平均=${Math.round(avg)}点 realized≈${Math.round(realized)}点 満貫+=${(manganPlus * 100).toFixed(1)}%（実データ: 平均~5,647・満貫+~15-20%）`,
+  );
+  if (avg < 4500 || avg > 5300)
+    throw new Error(`和了点の子基準平均が範囲外: ${Math.round(avg)}（目標~4,900＝realized~5,600）`);
+  if (manganPlus < 0.14 || manganPlus > 0.23)
+    throw new Error(`満貫以上の割合が範囲外: ${(manganPlus * 100).toFixed(1)}%（実データ~15-20%）`);
+}
+
 // ---- 2) フルデイ実行: 例外なく閉店まで、売上が出るか ----
 function autoPlay(seed: number): GameState {
   const state = createInitialState(seed);
@@ -143,6 +161,40 @@ function autoPlayBlue(seed: number): GameState {
   return state;
 }
 {
+  // (a) 点5は円の振れが大きい（リアルな差はレート¥/1000点＋祝儀のみ。点棒移動はレート非依存）。
+  //     同じゼロサム点棒を点5/点3で精算し、平均|円収支|を比較する。
+  const vs = createInitialState(7);
+  function meanAbsYen(rate: Rate): number {
+    let total = 0;
+    let n = 0;
+    for (let i = 0; i < 400; i++) {
+      const raw = [0, 1, 2, 3].map(() => vs.rng.range(-20000, 60000));
+      const adj = (raw.reduce((a, b) => a + b, 0) - 100000) / 4;
+      const pts = raw.map((p) => Math.round(p - adj));
+      pts[3] += 100000 - pts.reduce((a, b) => a + b, 0);
+      const seats = [0, 1, 2, 3].map((idx) => ({
+        occupant: { kind: "STAFF" as const, staffId: 0 },
+        points: pts[idx],
+        isDealer: idx === 0,
+      }));
+      const table = {
+        id: 1,
+        rate,
+        seats: seats as never,
+        progress: { status: "SETTLING" as const, elapsedMin: 0, hanchanCount: 0, kyoku: 4, honba: 0, dealerSeat: 0, resolvedKyoku: 8 },
+        openedAtMin: 720,
+      };
+      const res = settleHanchan(table, vs.customers, vs.rng);
+      for (const s of res.seats) {
+        total += Math.abs(s.yen);
+        n++;
+      }
+    }
+    return total / n;
+  }
+  const blueAbs = meanAbsYen("BLUE");
+  const greenAbs = meanAbsYen("GREEN");
+  // (b) 点5一辺倒の飛び数は観測のみ（blueHandMult撤去でレート由来＝稀。ハードな下限は設けない）。
   let busts = 0;
   let rev = 0;
   for (const seed of [1, 7, 42, 100, 2024]) {
@@ -150,10 +202,12 @@ function autoPlayBlue(seed: number): GameState {
     busts += s.stats.busts;
     rev += s.revenue.total;
   }
-  console.log(`[blue-aggressive] 5日 総飛=${busts} 平均売上=¥${Math.round(rev / 5).toLocaleString()}（点5一辺倒）`);
-  // 高レート(点5)の核＝資金が尽きて飛ぶ体験。点5一辺倒なら数日に複数回は飛ぶこと（怖さ）。
-  // 現状チューニングで5日=5飛び前後。下限3を回帰ガード（blueHandMult/rate/bankroll が緩むと割る）。
-  if (busts < 3) throw new Error(`点5一辺倒の5日で飛び${busts}<3: 高レートの怖さが弱い（blueHandMult/rateBLUE/bankroll を見直す）`);
+  console.log(
+    `[blue-volatility] 平均|円収支| 点5=¥${Math.round(blueAbs)} 点3=¥${Math.round(greenAbs)}（比 ${(blueAbs / greenAbs).toFixed(2)}x）｜点5一辺倒5日 総飛=${busts} 平均売上=¥${Math.round(rev / 5).toLocaleString()}`,
+  );
+  // 点5の振れが点3を明確に上回ること（リアルな高レートの体験＝円の振れ）。
+  if (!(blueAbs > greenAbs * 2))
+    throw new Error(`点5の円の振れが点3の2倍未満（${(blueAbs / greenAbs).toFixed(2)}x）: rateYenPer1000.BLUE/祝儀を見直す`);
 }
 
 let totalRev = 0;

@@ -291,9 +291,9 @@ function resolveKyoku(state: GameState, table: Table): { renchan: boolean; buste
   const winner = weightedIndex(rng, weights);
   const winnerIsDealer = winner === dealer;
 
-  // 手の点数（子のロン基準点）。ヘビーテール。点5卓は手が大きく振れる（飛びのリスク）。
-  let handPts = Math.round(rng.weighted<number>(k.handValues));
-  if (table.rate === "BLUE") handPts = Math.round(handPts * k.blueHandMult);
+  // 手の点数（子のロン基準点）。実分布（handValues）から抽選。点棒移動はレート非依存
+  // ＝点5・点3で同一（実麻雀どおり。点5の差は円レート・場代・祝儀でのみ表現）。
+  const handPts = Math.round(rng.weighted<number>(k.handValues));
   const tsumo = rng.chance(k.tsumoProb);
   const honba = table.progress.honba;
   // 実麻雀の支払いに寄せ、各支払いを100点単位に丸める（勝者は丸め後の合計をそのまま得るので
