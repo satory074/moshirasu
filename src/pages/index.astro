@@ -541,6 +541,34 @@ import "../styles/globals.css";
         letter-spacing: 0.02em;
         box-shadow: 0 3px 9px rgba(94, 58, 22, 0.3);
       }
+      .btn-pause {
+        background: linear-gradient(180deg, #8a8f98, #6b7079);
+      }
+      /* 進行速度セレクタ（x1=ゆっくり / x2 / x4）。進行ボタンの下に並ぶ。 */
+      .speed-sel {
+        display: flex;
+        gap: 0.3rem;
+        justify-content: center;
+        margin-top: 0.4rem;
+      }
+      .speed-pill {
+        flex: 1 1 0;
+        max-width: 64px;
+        background: rgba(255, 255, 255, 0.94);
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.24rem 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+      }
+      .speed-pill-on {
+        background: var(--amber);
+        color: #1a1206;
+        border-color: transparent;
+      }
 
       /* ===== 操作可能アフォーダンス: 今押せる要素の角に赤い丸 ===== */
       /* 対象クラスは「操作できるときだけ」付与されるので、赤丸もそれに同期して出入りする。 */
@@ -844,6 +872,12 @@ import "../styles/globals.css";
       }
       .mini[disabled] {
         opacity: 0.45;
+      }
+      /* 「すべて本走」一括ボタン（店員カード内・右寄せ・店員テーマの紫アクセント）。 */
+      .honso-all {
+        margin-left: auto;
+        background: linear-gradient(180deg, #8b5cf6, #7c3aed);
+        color: #fff;
       }
       .tc-hint {
         margin-top: 0.42rem;

@@ -24,6 +24,8 @@ const {
   openTableAction,
   seatCustomerAction,
   honsoAction,
+  honsoAllAction,
+  setSpeedAction,
   swapAction,
   moveCustomerAction,
 } = await import("../src/game/actions");
@@ -46,6 +48,13 @@ const dispatch = (cmd: Command) => {
       return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
     case "honso":
       return toRes(honsoAction(state, cmd.tableId, cmd.seatIdx, cmd.staffId));
+    case "honsoAll":
+      return toRes(honsoAllAction(state));
+    case "setSpeed":
+      return toRes(setSpeedAction(state, cmd.mult));
+    case "pause":
+      state.advancing = false; // 実機では engine.stop()。ここでは進行フラグだけ落とす。
+      return { ok: true };
     case "swap":
       return toRes(swapAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
     case "move":
@@ -113,6 +122,62 @@ if (state.waiting.length >= 1) {
       const hr = honsoAction(state, t.id, firstEmptyIdx(t), st.id);
       renderer.render(state);
       console.log(`[dom] 本走: ${hr.ok ? "成功" : "失敗:" + (hr as { reason: string }).reason}`);
+    }
+  }
+}
+
+// ---- 進行速度セレクタ（x1/x2/x4）----
+// renderAdvance は HUD内(#advance-wrap)と下部バー(#advance-bar)の両方に同じUIを出すので、
+// 片方（#advance-wrap）にスコープして数える。
+{
+  const wrap = root.querySelector("#advance-wrap")!;
+  const pills = wrap.querySelectorAll('[data-action="set-speed"]');
+  assert(pills.length === 3, "速度ピルが3つ（x1/x2/x4）");
+  assert(!!wrap.querySelector('[data-action="set-speed"].speed-pill-on'), "現在速度がハイライト");
+  const x4 = wrap.querySelector('[data-action="set-speed"][data-mult="4"]') as unknown as HTMLElement;
+  click(x4);
+  assert(state.speed === 4, "x4 クリックで state.speed=4");
+  assert(
+    (wrap.querySelector('[data-action="set-speed"][data-mult="4"]') as Element).className.includes("speed-pill-on"),
+    "x4 がハイライトに切替",
+  );
+  // 不正値は無視して x1 に戻る
+  setSpeedAction(state, 3);
+  assert(state.speed === 1, "許可外の速度は x1 にフォールバック");
+  setSpeedAction(state, 1);
+  console.log("[dom] 速度セレクタ x1/x2/x4 OK");
+}
+
+// ---- 一時停止ボタン（進行中のみ）----
+{
+  state.advancing = true;
+  renderer.render(state);
+  const pauseBtn = root.querySelector('[data-action="pause"]') as unknown as HTMLElement;
+  assert(!!pauseBtn, "進行中は一時停止ボタンが出る");
+  assert(!root.querySelector('[data-action="advance"]'), "進行中は『次のイベントへ』は出ない");
+  click(pauseBtn);
+  // click→dispatch の mutation を TS は追えず advancing を true リテラルに絞るので boolean に広げて比較。
+  assert((state.advancing as boolean) === false, "一時停止で advancing=false");
+  renderer.render(state);
+  assert(!!root.querySelector('[data-action="advance"]'), "停止後は『次のイベントへ』が戻る");
+  console.log("[dom] 一時停止ボタン OK");
+}
+
+// ---- すべて本走（空席一括埋め）----
+{
+  const t = state.tables[0];
+  if (t && t.progress.status === "WAITING_TO_START") {
+    const beforeEmpty = t.seats.filter((s) => s.occupant.kind === "EMPTY").length;
+    const beforeFree = state.staff.filter((s) => !s.busy).length;
+    if (beforeEmpty > 0 && beforeFree > 0) {
+      renderer.render(state);
+      const allBtn = root.querySelector('[data-action="honso-all"]') as unknown as HTMLElement;
+      assert(!!allBtn, "空席＋空き店員ありで『すべて本走』ボタンが出る");
+      click(allBtn);
+      const afterEmpty = t.seats.filter((s) => s.occupant.kind === "EMPTY").length;
+      const expected = Math.max(0, beforeEmpty - beforeFree);
+      assert(afterEmpty === expected, "空席が空き店員ぶん本走で埋まった");
+      console.log(`[dom] すべて本走 OK（空席 ${beforeEmpty}→${afterEmpty}）`);
     }
   }
 }

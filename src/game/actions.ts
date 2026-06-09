@@ -266,6 +266,39 @@ export function changeRateAction(state: GameState, tableId: number): Result {
   return { ok: true };
 }
 
+/**
+ * すべて本走: 半荘前で客が1人以上いる卓の空席を、空き店員で順に埋める。
+ * 店員が尽きるか、埋められる空席が無くなるまで。手作業の本走入れを一括化する。
+ */
+export function honsoAllAction(state: GameState): Result {
+  const free = state.staff.filter((s) => !s.busy);
+  if (free.length === 0) return { ok: false, reason: "空いている店員がいません" };
+  let filled = 0;
+  let fi = 0;
+  for (const table of state.tables) {
+    if (fi >= free.length) break;
+    if (table.progress.status !== "WAITING_TO_START") continue;
+    if (customerCount(table) === 0) continue; // 客0の卓は本走しない
+    for (let i = 0; i < 4 && fi < free.length; i++) {
+      const seat = table.seats[i];
+      if (seat.occupant.kind !== "EMPTY") continue;
+      const st = free[fi++];
+      seat.occupant = { kind: "STAFF", staffId: st.id };
+      st.busy = true;
+      filled++;
+    }
+  }
+  if (filled === 0) return { ok: false, reason: "本走で埋められる空席がありません" };
+  addLog(state, "HONSO", `🧑‍💼 空席${filled}席に本走で店員を入れた`);
+  return { ok: true };
+}
+
+/** 自動進行アニメの速度倍率を設定する（許可された倍率以外は無視＝x1）。 */
+export function setSpeedAction(state: GameState, mult: number): Result {
+  state.speed = CONFIG.advanceSpeeds.includes(mult) ? mult : 1;
+  return { ok: true };
+}
+
 // ---- ヘルパー ----
 
 function prefAllows(c: Customer, rate: Rate): boolean {

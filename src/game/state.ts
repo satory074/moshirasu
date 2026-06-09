@@ -18,6 +18,7 @@ export function createInitialState(seed: number, staffCount: number = CONFIG.sta
     clockMin: CONFIG.openMin,
     phase: "OPEN",
     advancing: false,
+    speed: 1,
     tables: [],
     waiting: [],
     customers: new Map(),

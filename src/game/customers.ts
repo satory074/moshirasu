@@ -116,10 +116,11 @@ export function tickWaiting(state: GameState, dtMin: number): void {
 
 /**
  * 半荘終了後、着席客が抜けるかどうかを判定する。
- * - ラスハン: 必ず抜ける
  * - 資金0: 必ず抜ける（飛び）
- * - 帰宅時刻到達: 必ず抜ける
- * - モシラス: 確率で抜ける（帰宅間近・資金薄で上昇）
+ * - 帰宅時刻到達: 必ず抜ける（時間切れ）
+ * - 最低3半荘: 上記2つ以外では、3半荘を打ち終えるまで必ず残る（硬い保証）
+ * - ラスハン: 必ず抜ける（3半荘以降）
+ * - モシラス: 確率で抜ける（帰宅間近・資金薄で上昇／3半荘以降）
  * busted=true は資金切れ。
  */
 export function decideLeaveOrStay(
@@ -129,8 +130,12 @@ export function decideLeaveOrStay(
   busted: boolean,
 ): { leaves: boolean; reason: "BUST" | "LASTHAN" | "TIMEUP" | "MOSHIRASU" | null } {
   if (busted) return { leaves: true, reason: "BUST" };
-  if (seat.call === "LASTHAN") return { leaves: true, reason: "LASTHAN" };
   if (state.clockMin >= customer.leaveByMin) return { leaves: true, reason: "TIMEUP" };
+  // 最低3半荘の「打つつもり」を硬く保証する。資金切れ・時間切れでない限り、
+  // 3半荘を打ち終えるまではラスハンでもモシラスでも離席しない（2半荘で帰る等は起きない）。
+  if (customer.hanchansPlayed < CONFIG.minHanchanIntent) return { leaves: false, reason: null };
+
+  if (seat.call === "LASTHAN") return { leaves: true, reason: "LASTHAN" };
 
   // モシラス: 確率で抜ける
   let p = CONFIG.moshirasuLeaveProb;
@@ -138,8 +143,6 @@ export function decideLeaveOrStay(
   if (minsLeft <= CONFIG.callLasthanBias.nearLeaveByMin) p += 0.25;
   const ratio = customer.bankroll / Math.max(1, customer.startBankroll);
   if (ratio <= CONFIG.callLasthanBias.lowBankrollRatio) p += 0.2;
-  // 最低3半荘打つつもり: まだ3半荘に満たない客は自主離席しにくい（ソフト保証）。
-  if (customer.hanchansPlayed < CONFIG.minHanchanIntent) p *= CONFIG.under3LeaveMult;
   if (state.rng.chance(p)) return { leaves: true, reason: "MOSHIRASU" };
   return { leaves: false, reason: null };
 }

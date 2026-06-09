@@ -4,9 +4,11 @@ import {
   changeRateAction,
   combineAction,
   honsoAction,
+  honsoAllAction,
   moveCustomerAction,
   openTableAction,
   seatCustomerAction,
+  setSpeedAction,
   swapAction,
 } from "./actions";
 import { createEngine, type Engine } from "./engine";
@@ -39,6 +41,8 @@ export function boot(): void {
         return toRes(seatCustomerAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
       case "honso":
         return toRes(honsoAction(state, cmd.tableId, cmd.seatIdx, cmd.staffId));
+      case "honsoAll":
+        return toRes(honsoAllAction(state));
       case "swap":
         return toRes(swapAction(state, cmd.customerId, cmd.tableId, cmd.seatIdx));
       case "move":
@@ -52,6 +56,12 @@ export function boot(): void {
         return { ok: true };
       case "advance":
         engine.advance();
+        return { ok: true };
+      case "setSpeed":
+        return toRes(setSpeedAction(state, cmd.mult));
+      case "pause":
+        engine.stop();
+        renderer.render(state); // 進行停止をボタン表示に反映
         return { ok: true };
       case "restart":
         restart();

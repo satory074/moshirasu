@@ -120,10 +120,13 @@ export function createEngine(state: GameState, onFrame: (state: GameState) => vo
 
     let stop = false;
     let steps = 0;
-    while (acc >= CONFIG.advanceTickMs && steps < CONFIG.maxStepsPerFrame) {
+    // 速度倍率で1tickの実時間間隔を割る（x1=ゆっくり / x2 / x4）。
+    // tick回数・rngには無関係なので seed リプレイは不変。
+    const tickMs = CONFIG.advanceTickMs / (state.speed || 1);
+    while (acc >= tickMs && steps < CONFIG.maxStepsPerFrame) {
       const prev = snapshot(state);
       tick(state);
-      acc -= CONFIG.advanceTickMs;
+      acc -= tickMs;
       steps++;
       if (detectStop(prev, state)) {
         stop = true;

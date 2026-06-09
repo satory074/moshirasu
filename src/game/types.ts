@@ -180,6 +180,8 @@ export interface GameState {
   phase: Phase;
   /** ターン制: 「次のイベントへ」自動進行アニメ中なら true（UIボタン抑止用）。 */
   advancing: boolean;
+  /** 自動進行アニメの速度倍率（1/2/4）。tick回数やrngには無関係＝seedリプレイ不変。 */
+  speed: number;
   tables: Table[];
   /** 待ち客（到着順）。 */
   waiting: Customer[];

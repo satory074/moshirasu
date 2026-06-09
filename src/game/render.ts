@@ -40,12 +40,15 @@ export type Command =
   | { type: "openTable"; rate: Rate; customerIds: number[] }
   | { type: "seat"; customerId: number; tableId: number; seatIdx: number }
   | { type: "honso"; tableId: number; seatIdx: number; staffId: number }
+  | { type: "honsoAll" }
   | { type: "swap"; customerId: number; tableId: number; seatIdx: number }
   | { type: "move"; customerId: number; tableId: number; seatIdx: number }
   | { type: "combine"; a: number; b: number }
   | { type: "changeRate"; tableId: number }
   | { type: "startGame"; staffCount: number }
   | { type: "advance" }
+  | { type: "setSpeed"; mult: number }
+  | { type: "pause" }
   | { type: "restart" };
 
 export type Dispatch = (cmd: Command) => { ok: boolean; reason?: string };
@@ -266,6 +269,15 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         break;
       case "advance":
         fire({ type: "advance" });
+        break;
+      case "honso-all":
+        fire({ type: "honsoAll" });
+        break;
+      case "set-speed":
+        fire({ type: "setSpeed", mult: Number(target.dataset.mult ?? "1") });
+        break;
+      case "pause":
+        fire({ type: "pause" });
         break;
       case "restart":
         fire({ type: "restart" });
@@ -771,27 +783,55 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     const total = state.staff.length;
     const busy = state.staff.filter((s) => s.busy).length;
     const free = total - busy;
-    // 店員数は開店前に確定済み（進行中の増員は不可）。情報表示のみ。
+    // 「すべて本走」で埋められる空席数（半荘前・客が1人以上いる卓の空席）。
+    let fillable = 0;
+    for (const t of state.tables) {
+      if (t.progress.status !== "WAITING_TO_START") continue;
+      if (t.seats.every((s) => s.occupant.kind !== "CUSTOMER")) continue;
+      fillable += t.seats.filter((s) => s.occupant.kind === "EMPTY").length;
+    }
+    const fillCount = Math.min(free, fillable);
+    const allBtn =
+      fillCount > 0
+        ? `<button data-action="honso-all" class="mini honso-all">🧑‍💼 すべて本走（空席${fillCount}席を埋める）</button>`
+        : "";
+    // 店員数は開店前に確定済み（進行中の増員は不可）。情報表示＋一括本走。
     el.staff.innerHTML = `
       <div class="staff-info">
         <span class="staff-emoji">🧑‍💼</span>
         <span class="staff-count">店員 <b>${total}</b>人</span>
         <span class="staff-detail">本走中 ${busy} ・ 空き ${free}</span>
         <span class="staff-wage">人件費 ${yen(state.expenses.wages)}</span>
-      </div>`;
+      </div>
+      ${allBtn}`;
   }
 
   function renderAdvance(state: GameState) {
     const closed = isClosed(state);
+    if (closed) {
+      el.advanceWrap.innerHTML = "";
+      el.advanceBar.innerHTML = "";
+      return;
+    }
     const busy = state.advancing;
-    const label = busy ? "⏳ 進行中…" : "▶ 次のイベントへ";
-    // 同じボタンを HUD内（PC）と画面下部固定バー（スマホ）の両方に出す。
+    // 進行中は「一時停止」、停止中は「次のイベントへ」。
+    const mainBtn = busy
+      ? `<button data-action="pause" class="btn-advance btn-pause">⏸ 一時停止</button>`
+      : `<button data-action="advance" class="btn-advance">▶ 次のイベントへ</button>`;
+    // 速度セレクタ（x1=ゆっくり / x2 / x4）。進行中でも切替可（次フレームから反映）。
+    const pills = CONFIG.advanceSpeeds
+      .map(
+        (m) =>
+          `<button data-action="set-speed" data-mult="${m}" class="speed-pill${
+            m === state.speed ? " speed-pill-on" : ""
+          }">x${m}</button>`,
+      )
+      .join("");
+    // 同じUIを HUD内（PC）と画面下部固定バー（スマホ）の両方に出す。
     // CSS のブレークポイントでどちらか一方だけ表示する。
-    const btn = closed
-      ? ""
-      : `<button data-action="advance" class="btn-advance" ${busy ? "disabled" : ""}>${label}</button>`;
-    el.advanceWrap.innerHTML = btn;
-    el.advanceBar.innerHTML = btn;
+    const html = `${mainBtn}<div class="speed-sel" role="group" aria-label="進行速度">${pills}</div>`;
+    el.advanceWrap.innerHTML = html;
+    el.advanceBar.innerHTML = html;
   }
 
   // 「卓を立てる」を直接操作のコンテキスト操作バーに。待ち客選択→大きな2レートCTA。
