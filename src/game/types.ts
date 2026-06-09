@@ -155,6 +155,8 @@ export interface Stats {
   served: number;
   /** プレイされた半荘の総数。 */
   hanchanPlayed: number;
+  /** うち点5(BLUE)卓の半荘数（点5中心プレイの判定＝称号用）。 */
+  blueHanchanPlayed: number;
   /** 怒って帰った客数。 */
   rageQuits: number;
   /** 資金が尽きて飛んだ客数。 */

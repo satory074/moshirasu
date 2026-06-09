@@ -12,6 +12,15 @@ import {
   type RankingStore,
   type ScoreEntry,
 } from "./ranking";
+import {
+  ACHIEVEMENTS,
+  applyDayResult,
+  buildDayResult,
+  loadProfile,
+  saveProfile,
+  type Achievement,
+  type PlayerProfile,
+} from "./profile";
 import { canChangeRate, firstEmptyIdx, hasEmptySeat } from "./tables";
 import {
   dayProgress,
@@ -44,6 +53,8 @@ export type Dispatch = (cmd: Command) => { ok: boolean; reason?: string };
 interface UiState {
   selected: number[]; // 選択中の待ち客ID（順序つき）
   combineFirst: number | null; // 合卓の1卓目
+  // チュートリアル（オンボーディング）の現在スライド。null なら非表示。
+  tutorialStep: number | null;
   // 席クリックで開くアテンド/交代/移動ピッカーの対象。null なら閉じている。
   // seat/swap は対象「席」起点、move は移動させる「客」起点（移動先卓をピッカーで選ぶ）。
   pickSeat:
@@ -67,8 +78,12 @@ interface RankingView {
 }
 
 export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
-  const ui: UiState = { selected: [], combineFirst: null, pickSeat: null };
+  const ui: UiState = { selected: [], combineFirst: null, pickSeat: null, tutorialStep: null };
   const setupState: SetupState = { staffCount: CONFIG.staffCount };
+  // 永続プロフィール（キャリア記録＋称号＋オンボーディング済みフラグ）。起動時に一度読む。
+  let profile: PlayerProfile = loadProfile();
+  // 今回の閉店で新たに解放した称号（結果画面のハイライト用・transient）。
+  let newAchievements: Achievement[] = [];
   const rankingStore: RankingStore = createRankingStore();
   const rankingView: RankingView = {
     builtForClosed: false,
@@ -112,6 +127,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     toast: must("#toast"),
     result: must("#result"),
     setup: must("#setup"),
+    tutorial: must("#tutorial"),
   };
 
   function must(sel: string): HTMLElement {
@@ -134,6 +150,25 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     }
     if (action === "start-game") {
       fire({ type: "startGame", staffCount: setupState.staffCount });
+      return;
+    }
+    // チュートリアル（オンボーディング）操作も lastState 不要で動く。
+    if (action === "tut-next") {
+      ui.tutorialStep = Math.min(TUTORIAL_SLIDES.length - 1, (ui.tutorialStep ?? 0) + 1);
+      renderTutorial();
+      return;
+    }
+    if (action === "tut-prev") {
+      ui.tutorialStep = Math.max(0, (ui.tutorialStep ?? 0) - 1);
+      renderTutorial();
+      return;
+    }
+    if (action === "tut-done") {
+      finishTutorial();
+      return;
+    }
+    if (action === "show-tutorial") {
+      showTutorial();
       return;
     }
 
@@ -264,6 +299,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     ui.selected = [];
     ui.combineFirst = null;
     ui.pickSeat = null;
+    newAchievements = [];
     pickerEl?.remove();
     pickerEl = null;
     for (const [, node] of tableCards) node.remove();
@@ -301,6 +337,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     el.setup.innerHTML = `
       <div class="setup-card">
         <div class="setup-title">🀄 開店準備</div>
+        ${careerSummaryHtml()}
         <div class="setup-lead">
           本走に入れる<b>店員の数</b>を決めて開店します。多いほど卓を埋めやすい一方、
           時給${yen(CONFIG.wagePerHourYen)}/人の人件費が利益を圧迫します。<br>
@@ -314,8 +351,21 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         <div class="setup-range">選択範囲 ${min}〜${max}人</div>
         <div class="setup-wage">想定人件費（約${hours.toFixed(1)}時間営業）: 約 ${yen(estWage)}</div>
         <button data-action="start-game" class="btn btn-blue setup-start">▶ ${n}人で開店する</button>
+        <button data-action="show-tutorial" class="setup-howto">📖 遊び方をもう一度</button>
       </div>`;
     el.setup.className = "setup-overlay show";
+  }
+
+  /** 設定画面に出すキャリア要約（営業実績がある時のみ）。 */
+  function careerSummaryHtml(): string {
+    if (profile.gamesPlayed <= 0) return "";
+    const best = profile.bestProfit !== null ? yen(profile.bestProfit) : "—";
+    return `
+      <div class="setup-career">
+        <span>営業 <b>${profile.gamesPlayed}</b>日</span>
+        <span>自己ベスト <b>${best}</b>${profile.bestRank ? `（${profile.bestRank}）` : ""}</span>
+        <span>称号 <b>${profile.unlockedAchievements.length}</b>/${ACHIEVEMENTS.length}</span>
+      </div>`;
   }
 
   function showSetup() {
@@ -324,6 +374,50 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
 
   function hideSetup() {
     el.setup.className = "setup-overlay";
+  }
+
+  // ---- オンボーディング（チュートリアル）----
+  /** 起動時の入口: 未オンボーディングならチュートリアル、済なら設定画面。 */
+  function showStart() {
+    if (!profile.onboarded) showTutorial();
+    else showSetup();
+  }
+
+  function showTutorial() {
+    ui.tutorialStep = 0;
+    renderTutorial();
+  }
+
+  function renderTutorial() {
+    const step = ui.tutorialStep ?? 0;
+    const slide = TUTORIAL_SLIDES[step];
+    const last = step === TUTORIAL_SLIDES.length - 1;
+    const dots = TUTORIAL_SLIDES.map((_, i) => `<span class="tut-dot ${i === step ? "tut-dot-on" : ""}"></span>`).join("");
+    el.tutorial.innerHTML = `
+      <div class="tutorial-card">
+        <div class="tut-emoji">${slide.emoji}</div>
+        <div class="tut-title">${slide.title}</div>
+        <div class="tut-body">${slide.body}</div>
+        <div class="tut-dots">${dots}</div>
+        <div class="tut-nav">
+          ${step > 0 ? `<button data-action="tut-prev" class="btn btn-green tut-prev">← 戻る</button>` : `<button data-action="tut-done" class="tut-skip">スキップ</button>`}
+          ${last
+            ? `<button data-action="tut-done" class="btn btn-blue tut-start">▶ はじめる</button>`
+            : `<button data-action="tut-next" class="btn btn-blue tut-next">次へ →</button>`}
+        </div>
+      </div>`;
+    el.tutorial.className = "tutorial-overlay show";
+  }
+
+  /** チュートリアルを閉じる。初回ならオンボーディング済みにして保存し、設定画面へ。 */
+  function finishTutorial() {
+    ui.tutorialStep = null;
+    el.tutorial.className = "tutorial-overlay";
+    if (!profile.onboarded) {
+      profile = { ...profile, onboarded: true };
+      saveProfile(profile);
+    }
+    showSetup();
   }
 
   // ---- メイン描画 ----
@@ -806,8 +900,14 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
   function buildResultCard(state: GameState) {
     const k = kpis(state);
     const { rank, comment } = scoreRank(k.profit);
-    rankingView.isNewBest = recordPersonalBest(Math.round(k.profit));
-    const savedName = lsGet("moshirasu.playerName") ?? "";
+    // 1日の結果をプロフィールへ反映（この閉店で一度だけ）。通算加算・称号判定・ベスト更新。
+    const day = buildDayResult(state);
+    const applied = applyDayResult(profile, day);
+    profile = applied.profile;
+    newAchievements = applied.newAchievements;
+    rankingView.isNewBest = applied.isNewBest && profile.gamesPlayed > 1; // 初日は「更新」表示しない
+    saveProfile(profile);
+    const savedName = profile.playerName;
     const bestLine = rankingView.isNewBest
       ? `<div class="result-best">🎉 自己ベスト更新！</div>`
       : "";
@@ -817,6 +917,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
         <div class="result-title">本日の営業終了</div>
         <div class="result-comment">${comment}</div>
         ${bestLine}
+        ${newAchievementsHtml()}
         <div class="result-grid">
           <div><span>利益</span><b>${yen(k.profit)}</b></div>
           <div><span>売上（場代）</span><b>${yen(k.revenue)}</b></div>
@@ -830,6 +931,7 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
           <div><span>同時待ちピーク</span><b>${state.stats.peakWaiting}人</b></div>
           <div><span>最終評判</span><b>${Math.round(state.reputation)}</b></div>
         </div>
+        ${careerPanelHtml()}
         <div class="rank-submit">
           <input id="rank-name" class="rank-name" maxlength="20" placeholder="店名・プレイヤー名" value="${escapeAttr(savedName)}" />
           <button data-action="submit-score" class="btn btn-blue rank-submit-btn">🏆 ランキングに登録</button>
@@ -859,7 +961,9 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     if (!lastState || !isClosed(lastState)) return;
     const input = el.result.querySelector<HTMLInputElement>("#rank-name");
     const name = input?.value ?? "";
-    lsSet("moshirasu.playerName", name.trim());
+    // 名前はプロフィールに保存（saveProfile が旧キーもミラーする）。
+    profile = { ...profile, playerName: name.trim() };
+    saveProfile(profile);
     const entry = buildScoreEntry(lastState, name);
     rankingView.submittedId = entry.id;
     el.result.querySelector<HTMLButtonElement>('[data-action="submit-score"]')?.setAttribute("disabled", "");
@@ -924,35 +1028,41 @@ export function createRenderer(root: HTMLElement, dispatch: Dispatch) {
     }
   }
 
-  /** 個人ベスト（このブラウザ）を更新し、更新したら true。 */
-  function recordPersonalBest(profit: number): boolean {
-    const prevRaw = lsGet("moshirasu.bestProfit");
-    const prev = prevRaw !== null ? Number(prevRaw) : Number.NEGATIVE_INFINITY;
-    const isNew = !Number.isNaN(prev) ? profit > prev : true;
-    if (isNew) lsSet("moshirasu.bestProfit", String(profit));
-    return Number.isFinite(prev) ? isNew : false; // 初回は「更新」表示しない
+  /** 今回新たに解放した称号のハイライト（無ければ空）。 */
+  function newAchievementsHtml(): string {
+    if (newAchievements.length === 0) return "";
+    const items = newAchievements
+      .map((a) => `<div class="ach-new-item"><span class="ach-emoji">${a.emoji}</span><span class="ach-text"><b>${a.title}</b><small>${a.desc}</small></span></div>`)
+      .join("");
+    return `<div class="ach-new"><div class="ach-new-head">🆕 称号を獲得！</div>${items}</div>`;
   }
 
-  return { render, reset, showSetup, hideSetup };
-}
-
-// ---- localStorage / エスケープ（DOM側の小ユーティリティ）----
-function lsGet(key: string): string | null {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  } catch {
-    return null;
+  /** 通算（キャリア）パネル＋全称号の獲得状況。 */
+  function careerPanelHtml(): string {
+    const best = profile.bestProfit !== null ? yen(profile.bestProfit) : "—";
+    const badges = ACHIEVEMENTS.map((a) => {
+      const got = profile.unlockedAchievements.includes(a.id);
+      return `<span class="ach-badge ${got ? "ach-got" : "ach-locked"}" title="${escapeAttr(a.title + "：" + a.desc)}">${got ? a.emoji : "🔒"}</span>`;
+    }).join("");
+    return `
+      <div class="career-panel">
+        <div class="career-head">📒 通算成績</div>
+        <div class="career-grid">
+          <div><span>営業日数</span><b>${profile.gamesPlayed}日</b></div>
+          <div><span>自己ベスト</span><b>${best}${profile.bestRank ? `（${profile.bestRank}）` : ""}</b></div>
+          <div><span>通算接客</span><b>${profile.careerServed}人</b></div>
+          <div><span>無事故営業</span><b>${profile.cleanDays}日</b></div>
+        </div>
+        <div class="career-ach-head">称号 ${profile.unlockedAchievements.length}/${ACHIEVEMENTS.length}</div>
+        <div class="career-ach">${badges}</div>
+      </div>`;
   }
+
+  return { render, reset, showSetup, hideSetup, showStart, showTutorial };
 }
 
-function lsSet(key: string, val: string): void {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(key, val);
-  } catch {
-    /* quota 等は無視 */
-  }
-}
-
+// ---- エスケープ（DOM側の小ユーティリティ）----
+// 名前・ベスト等の永続は profile.ts（localStorage 抽象）に集約。
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -1001,6 +1111,31 @@ function repColor(r: number): string {
 }
 
 void rateLabel; // 予約（将来のツールチップ用）
+
+// ---- チュートリアル（オンボーディング）スライド ----
+// 認知負荷を下げるため目的→ループ→点5/点3→交代/合卓 の順に分割（research: tutorial分散）。
+const TUTORIAL_SLIDES: { emoji: string; title: string; body: string }[] = [
+  {
+    emoji: "🀄",
+    title: "あなたは雀荘の店長",
+    body: "17:00開店〜閉店まで卓を回し、<b>利益（場代の売上 − 店員の人件費）</b>を最大化するのが目的です。閉店時に成績がランキングに登録されます。時間は<b>「次のイベントへ」</b>を押すと次の判断ポイントまで自動で進みます（1プレイ ~5分）。",
+  },
+  {
+    emoji: "🔄",
+    title: "基本の流れ",
+    body: "① 右の<b>待ち客</b>をタップで選ぶ（最大4人）→ ② <b>卓を立てる</b>（レートを選択）→ ③ 空席は<b>クリックして客を案内 or 店員（本走）</b>で埋める → ④「次のイベントへ」で対局を進める。本走は場代が入らないので、なるべく客で埋めましょう。",
+  },
+  {
+    emoji: "🔵",
+    title: "点5は怖いが稼げる",
+    body: `<b>点5(ブルー)</b>＝場代${yen(CONFIG.gameFeeYen.BLUE)}/半荘で大きく稼げるが、手が大きく振れて<b>薄財布の客が飛ぶ</b>（評判が下がる）。<b>点3(グリーン)</b>＝場代${yen(CONFIG.gameFeeYen.GREEN)}/半荘で安全。コツは<b>厚財布の客を点5へ、薄い客は点3へ</b>。「どちらでも」の客の振り分けが腕の見せ所です。`,
+  },
+  {
+    emoji: "🔁",
+    title: "交代・合卓・レート",
+    body: "東場のうち（または開始直前）は、<b>本走席をクリックして待ち客と交代</b>できます。半荘前の卓は<b>合卓</b>やレート変更も可能。各卓には「今できること」のヒントが出るので、迷ったら読んでください。さあ、開店です！",
+  },
+];
 
 // ---- 骨格マークアップ ----
 const SHELL = `
@@ -1054,4 +1189,5 @@ const SHELL = `
 <div id="toast" class="toast"></div>
 <div id="result" class="result-overlay"></div>
 <div id="setup" class="setup-overlay"></div>
+<div id="tutorial" class="tutorial-overlay"></div>
 `;

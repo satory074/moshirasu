@@ -1048,6 +1048,198 @@ import "../styles/globals.css";
         min-height: 48px;
         font-size: 1rem;
       }
+      .setup-career {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.4rem 1rem;
+        font-size: 0.76rem;
+        color: var(--muted);
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        padding: 0.5rem 0.7rem;
+        margin: 0.6rem 0 0.2rem;
+      }
+      .setup-career b {
+        color: var(--ink);
+      }
+      .setup-howto {
+        display: block;
+        width: 100%;
+        margin-top: 0.6rem;
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+
+      /* ===== チュートリアル（オンボーディング）===== */
+      .tutorial-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 14, 11, 0.82);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 80;
+        backdrop-filter: blur(3px);
+      }
+      .tutorial-overlay.show {
+        display: flex;
+      }
+      .tutorial-card {
+        background: var(--surface-1);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-lg);
+        padding: 1.6rem 1.8rem;
+        text-align: center;
+        max-width: 460px;
+        width: 92%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      .tut-emoji {
+        font-size: 2.6rem;
+        line-height: 1;
+      }
+      .tut-title {
+        font-size: 1.3rem;
+        font-weight: 900;
+        margin: 0.5rem 0 0.7rem;
+      }
+      .tut-body {
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.75;
+        text-align: left;
+      }
+      .tut-body b {
+        color: var(--ink);
+      }
+      .tut-dots {
+        display: flex;
+        justify-content: center;
+        gap: 0.4rem;
+        margin: 1.1rem 0;
+      }
+      .tut-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--border-strong);
+      }
+      .tut-dot-on {
+        background: var(--blue);
+      }
+      .tut-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .tut-nav .btn {
+        min-height: 44px;
+        flex: 1;
+      }
+      .tut-skip {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.84rem;
+        text-decoration: underline;
+        cursor: pointer;
+        flex: 1;
+      }
+
+      /* ===== 通算成績・称号（結果画面）===== */
+      .ach-new {
+        background: rgba(232, 168, 56, 0.12);
+        border: 1px solid var(--amber);
+        border-radius: var(--r-md);
+        padding: 0.6rem 0.8rem;
+        margin: 0.6rem 0;
+      }
+      .ach-new-head {
+        font-weight: 800;
+        font-size: 0.84rem;
+        color: var(--amber-ink);
+        margin-bottom: 0.4rem;
+      }
+      .ach-new-item {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        text-align: left;
+        padding: 0.2rem 0;
+      }
+      .ach-new-item .ach-emoji {
+        font-size: 1.5rem;
+      }
+      .ach-text {
+        display: flex;
+        flex-direction: column;
+      }
+      .ach-text small {
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .career-panel {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        padding: 0.7rem 0.9rem;
+        margin: 0.6rem 0;
+      }
+      .career-head,
+      .career-ach-head {
+        font-weight: 800;
+        font-size: 0.8rem;
+        color: var(--ink);
+        margin-bottom: 0.4rem;
+      }
+      .career-ach-head {
+        margin-top: 0.6rem;
+      }
+      .career-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.3rem 0.8rem;
+      }
+      .career-grid > div {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .career-grid b {
+        color: var(--ink);
+      }
+      .career-ach {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+      }
+      .ach-badge {
+        font-size: 1.15rem;
+        width: 2rem;
+        height: 2rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+      }
+      .ach-locked {
+        filter: grayscale(1);
+        opacity: 0.5;
+      }
+      .ach-got {
+        border-color: var(--amber);
+        background: rgba(232, 168, 56, 0.12);
+      }
 
       /* ===== フッター ===== */
       .page-foot {

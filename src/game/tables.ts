@@ -344,6 +344,7 @@ function settleTable(state: GameState, table: Table): void {
     }
   }
   state.stats.hanchanPlayed++;
+  if (table.rate === "BLUE") state.stats.blueHanchanPlayed++;
 
   // --- 着順精算（客の資金増減）---
   const result = settleHanchan(table, state.customers, state.rng);

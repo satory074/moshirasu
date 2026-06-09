@@ -92,8 +92,8 @@ export function boot(): void {
     }
   });
 
-  // 起動時は即開始せず、開店前設定（店員数）を表示する。
-  renderer.showSetup();
+  // 起動時は即開始せず、初回はチュートリアル→以降は開店前設定を表示する。
+  renderer.showStart();
 }
 
 // DOM 準備後に起動

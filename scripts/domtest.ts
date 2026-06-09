@@ -142,6 +142,16 @@ assert(state.phase === "CLOSED", "閉店した");
 assert(overlay.className.includes("show"), "結果画面が表示された");
 assert(!!root.querySelector(".result-rank"), "ランク表示がある");
 
+// 通算成績パネル＋称号（WS4）。初回閉店なので「初営業」称号が新規解放される。
+assert(!!root.querySelector(".career-panel"), "通算成績パネルが表示された");
+assert(!!root.querySelector(".career-ach .ach-badge"), "称号バッジが並ぶ");
+assert(!!root.querySelector(".ach-new"), "新規称号ハイライトが出た（初営業）");
+{
+  const profStored = dom.window.localStorage.getItem("moshirasu.profile.v1");
+  assert(!!profStored && profStored.includes('"gamesPlayed":1'), "プロフィールに1日ぶん加算され保存された");
+}
+console.log("[dom] 通算成績・称号表示＋永続化 OK");
+
 // ランキング: 名前を入れて登録 → リスト表示＆ハイライト＆localStorage 保存
 await microtask(); // loadRanking（非同期）の完了を待つ
 assert(!!root.querySelector("#rank-name"), "名前入力欄がある");
@@ -292,6 +302,55 @@ console.log("[dom] ランキング登録 OK");
     "一度断った客は交代候補から除外（要望6）",
   );
   console.log("[dom] 交代ピッカー＋拒否客の除外 OK");
+  root2.remove(); // 次ブロックの #tutorial 等とID衝突しないよう撤去
+}
+
+// ---- オンボーディング（WS3）: 初回はチュートリアル → スキップで設定画面 → 2回目は設定直行 ----
+{
+  dom.window.localStorage.removeItem("moshirasu.profile.v1");
+  dom.window.localStorage.removeItem("moshirasu.playerName");
+  dom.window.localStorage.removeItem("moshirasu.bestProfit");
+  const root3 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(root3);
+  const r3 = createRenderer(root3 as unknown as HTMLElement, () => ({ ok: true }));
+
+  // 初回 showStart → チュートリアルが表示
+  r3.showStart();
+  const tut = root3.querySelector("#tutorial")!;
+  const setup3 = root3.querySelector("#setup")!;
+  assert(tut.className.includes("show"), "初回はチュートリアルが表示された");
+  assert(!setup3.className.includes("show"), "初回は設定画面はまだ非表示");
+  assert(!!root3.querySelector('[data-action="tut-next"]'), "「次へ」ボタンがある");
+
+  // 「次へ」で最終スライドまで → 「はじめる」(tut-done)
+  let nextBtn = root3.querySelector('[data-action="tut-next"]') as unknown as HTMLElement;
+  let guardT = 0;
+  while (nextBtn && guardT < 20) {
+    guardT++;
+    click(nextBtn);
+    nextBtn = root3.querySelector('[data-action="tut-next"]') as unknown as HTMLElement;
+  }
+  const doneBtn = root3.querySelector('[data-action="tut-done"]') as unknown as HTMLElement;
+  assert(!!doneBtn, "最終スライドに「はじめる」がある");
+  click(doneBtn);
+  assert(!tut.className.includes("show"), "チュートリアルが閉じた");
+  assert(setup3.className.includes("show"), "チュートリアル後に設定画面が表示された");
+  const profStored = dom.window.localStorage.getItem("moshirasu.profile.v1");
+  assert(!!profStored && profStored.includes('"onboarded":true'), "オンボーディング済みが保存された");
+  console.log("[dom] 初回オンボーディング→設定画面 OK");
+
+  // 2回目（onboarded=true 状態を読む新しい renderer）→ showStart で設定直行
+  const root4 = dom.window.document.createElement("div");
+  root3.remove();
+  dom.window.document.body.appendChild(root4);
+  const r4 = createRenderer(root4 as unknown as HTMLElement, () => ({ ok: true }));
+  r4.showStart();
+  assert(!root4.querySelector("#tutorial")!.className.includes("show"), "2回目はチュートリアル非表示");
+  assert(root4.querySelector("#setup")!.className.includes("show"), "2回目は設定画面直行");
+  // 設定画面に「遊び方をもう一度」ボタンがある（再生動線）
+  assert(!!root4.querySelector('[data-action="show-tutorial"]'), "設定画面に遊び方再生ボタンがある");
+  console.log("[dom] 2回目は設定直行＋遊び方再生動線 OK");
+  root4.remove();
 }
 
 console.log("\n✅ DOM smoke test passed");

@@ -50,7 +50,8 @@ export const CONFIG = {
     seatedWaitMult: 0.5,
     // 点5(BLUE)は赤・祝儀の世界で手が大きく振れる。点5卓の手の点数を増幅し、
     // 薄い資金の客が飛ぶ「高レートの怖さ」を演出する（点3=GREENは等倍）。
-    blueHandMult: 1.8,
+    // 2.4: 点棒の振れ→素点→円の振れを増やし、薄財布の客を点5で飛ばす（怖さの強化）。
+    blueHandMult: 2.4,
   },
 
   // ---- 卓数 ----
@@ -84,10 +85,12 @@ export const CONFIG = {
   // ---- 経済 ----
   // 場代（客1人・1半荘あたり）= プレイヤーの実売上。点5の方を高く設定。
   // 客数を絞った（レバーB）ぶん1客の単価を上げ、利益水準を維持する（少数・高単価）。
-  gameFeeYen: { BLUE: 820, GREEN: 480 } as Record<Rate, number>,
-  // レート（1000点あたりの円）。点5=¥100, 点3=¥30。
+  // 点5=¥950: 飛び(churn)のリスクを負うぶん、無事に回せば点3を明確に上回る旨味を持たせる。
+  // 「厚財布の客を点5へ、薄財布を点3へ」という采配が利益に効くようにするための主リターン源。
+  gameFeeYen: { BLUE: 950, GREEN: 480 } as Record<Rate, number>,
+  // レート（1000点あたりの円）。点5=¥110, 点3=¥30。
   // 点5を高くして資金変動を大きくし、薄い資金の客が大敗で飛ぶ「高レートの怖さ」を成立させる。
-  rateYenPer1000: { BLUE: 100, GREEN: 30 } as Record<Rate, number>,
+  rateYenPer1000: { BLUE: 110, GREEN: 30 } as Record<Rate, number>,
   oka: { mochi: 25000, kaeshi: 30000 }, // 25000持ち30000返し → 1位に+20000
   uma: [20, 10, -10, -20] as number[], // ウマ（×1000点）
   // 点棒スプレッドのテンプレ範囲（×1000点）。ゼロサムに正規化される。
@@ -102,7 +105,7 @@ export const CONFIG = {
   // ---- 客のステータス分布 ----
   skill: { mean: 0.5, sd: 0.18 },
   luck: { mean: 0.5, sd: 0.15, driftSd: 0.05 },
-  bankrollYen: { mean: 30000, sd: 14000, min: 9000 }, // 薄い財布も混ざり、点5で飛びうる
+  bankrollYen: { mean: 28000, sd: 15000, min: 7500 }, // 薄い財布をやや厚めに混ぜ、点5で飛びやすく（怖さ）
   patienceMin: { mean: 28, sd: 9, min: 8 },
   sessionLenMin: { mean: 170, sd: 55, min: 60 }, // leaveByMin = arrival + これ
 
@@ -141,7 +144,7 @@ export const CONFIG = {
     max: 100,
     min: 0,
     rageHit: 3, // 怒り離席で減
-    bustHit: 1.5, // 飛びで減
+    bustHit: 2.5, // 飛びで減（薄財布を点5に座らせる雑な采配を罰する＝来店減でじわ効く）
     serveGain: 0.6, // 着席させると増
     satisfiedGain: 1.0, // 満足して帰すと増
   },
@@ -151,9 +154,11 @@ export const CONFIG = {
   staffCount: 2, // 開店前設定の初期値（デフォルト店員数）
   staffMin: 1, // 設定で選べる最小店員数（最大は maxTables*4 を使用箇所で導出＝全席を本走で埋められる上限）
   wagePerHourYen: 1200, // 店員1人あたりの時給（人件費）。多いほど利益を圧迫。
-  // ~7.5h営業の最適寄りプレイで利益 ~¥50k（飛び/怒りで上下に大きく振れる）。
-  // B(=0.9×)を「及第点」中央に置き、A/Sが上振れ、C/Dが下振れになるよう設定。
-  targetProfit: 50000, // スコア評価の基準（利益＝売上−人件費）
+  // スコア評価の基準（利益＝売上−人件費）。
+  // 多シード実測（24seed・最適寄りの点5中心プレイ）で利益の中央値が ~¥42k だったため、
+  // これを「及第点(B)の中央」に置く。旧50kは“当たりシード”に寄っており、普通に上手い日が
+  // C/Dに落ちる校正ズレ（運がDを生む）があった。scoreRank は実測分布に整合した絶対帯で判定する。
+  targetProfit: 42000,
 
   // ---- その他 ----
   logCap: 120,
@@ -162,12 +167,18 @@ export const CONFIG = {
   // 客が来店時に既存卓へ案内されるのを待つ猶予など、将来の拡張用フック。
 } as const;
 
-/** 評価レター（利益＝売上−人件費 で判定）。 */
+/**
+ * 評価レター（利益＝売上−人件費 で判定）。
+ * 帯は24seed実測（最適寄りの点5中心プレイ）の利益分布に整合した「絶対値」:
+ *   分布: 下位の不振日 ~¥6-9k / 本流(B)が ~¥34-51k(中央¥42k) / 上振れ ~¥56-71k。
+ *   S≥65k(上位~12%) A≥52k(上位~17%) B≥34k(本流~50%・中央=B) C≥20k(不振) D<20k(惨敗/客足壊滅)。
+ * これにより「普通に上手い日=B、攻めて上振れ=A/S、不振日=C、明確な失敗=D」となり、
+ * 運の下振れだけでDに落ちにくい（不振日はC止まり）。
+ */
 export function scoreRank(profit: number): { rank: string; comment: string } {
-  const t = CONFIG.targetProfit;
-  if (profit >= t * 1.5) return { rank: "S", comment: "伝説の雀荘マネージャー！" };
-  if (profit >= t * 1.2) return { rank: "A", comment: "見事な卓回し。常連も大満足。" };
-  if (profit >= t * 0.9) return { rank: "B", comment: "堅実な営業。及第点。" };
-  if (profit >= t * 0.6) return { rank: "C", comment: "もう少し回転を上げたい。" };
+  if (profit >= 65000) return { rank: "S", comment: "伝説の雀荘マネージャー！点5を攻めて大勝ち。" };
+  if (profit >= 52000) return { rank: "A", comment: "見事な卓回し。常連も大満足。" };
+  if (profit >= 34000) return { rank: "B", comment: "堅実な営業。及第点。" };
+  if (profit >= 20000) return { rank: "C", comment: "客足が鈍い日もある。点5の回転を上げたい。" };
   return { rank: "D", comment: "人件費に見合う回転を作ろう…修行あるのみ。" };
 }

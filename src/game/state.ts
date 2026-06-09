@@ -28,6 +28,7 @@ export function createInitialState(seed: number, staffCount: number = CONFIG.sta
     stats: {
       served: 0,
       hanchanPlayed: 0,
+      blueHanchanPlayed: 0,
       rageQuits: 0,
       busts: 0,
       peakWaiting: 0,

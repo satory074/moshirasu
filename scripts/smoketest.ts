@@ -1,6 +1,6 @@
 // 簡易スモークテスト: 実際のエンジンを多数tick回し、破綻しないか確認する。
 // 実行: npx tsx scripts/smoketest.ts
-import { CONFIG } from "../src/game/config";
+import { CONFIG, scoreRank } from "../src/game/config";
 import { settleHanchan } from "../src/game/economy";
 import { createInitialState } from "../src/game/state";
 import { tick, snapshot, detectStop } from "../src/game/engine";
@@ -13,6 +13,14 @@ import {
 } from "../src/game/actions";
 import { spawnCustomer } from "../src/game/customers";
 import { LocalRankingStore, type ScoreEntry } from "../src/game/ranking";
+import {
+  applyDayResult,
+  defaultProfile,
+  loadProfile,
+  saveProfile,
+  type DayResult,
+  type KV,
+} from "../src/game/profile";
 import { firstEmptyIdx, freeStaff } from "../src/game/tables";
 import type { GameState, Rate } from "../src/game/types";
 
@@ -143,8 +151,9 @@ function autoPlayBlue(seed: number): GameState {
     rev += s.revenue.total;
   }
   console.log(`[blue-aggressive] 5日 総飛=${busts} 平均売上=¥${Math.round(rev / 5).toLocaleString()}（点5一辺倒）`);
-  // 高レート(点5)の核＝資金が尽きて飛ぶ体験。点5一辺倒なら数日に1回は飛ぶこと。
-  if (busts === 0) throw new Error("点5一辺倒でも飛びが0: 高レートの怖さが死んでいる（blueHandMult/rate/bankroll を見直す）");
+  // 高レート(点5)の核＝資金が尽きて飛ぶ体験。点5一辺倒なら数日に複数回は飛ぶこと（怖さ）。
+  // 現状チューニングで5日=5飛び前後。下限3を回帰ガード（blueHandMult/rate/bankroll が緩むと割る）。
+  if (busts < 3) throw new Error(`点5一辺倒の5日で飛び${busts}<3: 高レートの怖さが弱い（blueHandMult/rateBLUE/bankroll を見直す）`);
 }
 
 let totalRev = 0;
@@ -167,11 +176,65 @@ for (const seed of [1, 7, 42, 100, 2024]) {
   // 人件費が発生していること（営業時間×店員数）。
   if (s.expenses.wages <= 0) throw new Error("no wages accrued");
 }
+const avgProfit = totalProfit / 5;
 console.log(
-  `\n[summary] 5日平均 売上=¥${Math.round(totalRev / 5).toLocaleString()} 利益=¥${Math.round(totalProfit / 5).toLocaleString()} 総半荘=${hanchan} 総飛=${busts} 総怒=${rage}`,
+  `\n[summary] 5日平均 売上=¥${Math.round(totalRev / 5).toLocaleString()} 利益=¥${Math.round(avgProfit).toLocaleString()} 総半荘=${hanchan} 総飛=${busts} 総怒=${rage}`,
 );
 if (totalRev <= 0) throw new Error("no revenue generated");
 if (hanchan <= 0) throw new Error("no hanchan played");
+
+// ---- 2d) 点5の旨味: 同条件で点5中心 > 点3一辺倒（リスクに見合うリターン）----
+// autoManage は点5中心（BLUE/ANY→BLUE）。比較用に点3一辺倒AIで同seedを回し、
+// 点5中心プレイの平均利益が点3一辺倒を明確に上回ること＝「高レートは怖いがリターンも大きい」を回帰保証。
+function autoPlayGreen(seed: number): GameState {
+  const state = createInitialState(seed);
+  let guard = 0;
+  while (state.phase !== "CLOSED" && guard < 100000) {
+    guard++;
+    for (const t of state.tables) {
+      if (t.progress.status !== "WAITING_TO_START") continue;
+      while (firstEmptyIdx(t) >= 0) {
+        const idx = firstEmptyIdx(t);
+        const cand = state.waiting.find((c) => c.pref === "ANY" || c.pref === t.rate);
+        if (cand) {
+          if (!seatCustomerAction(state, cand.id, t.id, idx).ok) break;
+        } else {
+          const st = freeStaff(state);
+          if (!st || !honsoAction(state, t.id, idx, st.id).ok) break;
+        }
+      }
+    }
+    if (state.tables.length < CONFIG.maxTables) {
+      const green = state.waiting.filter((c) => c.pref === "GREEN" || c.pref === "ANY").slice(0, 4);
+      if (green.length >= 2) openTableAction(state, "GREEN", green.map((c) => c.id));
+    }
+    tick(state);
+  }
+  return state;
+}
+{
+  const seeds = [1, 7, 42, 100, 2024];
+  let blueProfit = 0;
+  let greenProfit = 0;
+  for (const seed of seeds) {
+    blueProfit += autoPlay(seed).revenue.total - autoPlay(seed).expenses.wages; // 点5中心
+    const g = autoPlayGreen(seed);
+    greenProfit += g.revenue.total - g.expenses.wages;
+  }
+  const blueAvg = blueProfit / seeds.length;
+  const greenAvg = greenProfit / seeds.length;
+  console.log(`[blue-vs-green] 点5中心 平均利益=¥${Math.round(blueAvg).toLocaleString()} > 点3一辺倒 平均利益=¥${Math.round(greenAvg).toLocaleString()}`);
+  if (!(blueAvg > greenAvg * 1.3))
+    throw new Error(`点5中心(${Math.round(blueAvg)})が点3一辺倒(${Math.round(greenAvg)})を1.3倍超で上回らない: 点5のリターンが不足（gameFeeYen.BLUE を見直す）`);
+}
+
+// ---- 2e) スコア帯: 最適寄りプレイの平均利益が B 帯(¥34k〜)に入る（運だけでDに落ちない校正）----
+{
+  const { rank } = scoreRank(avgProfit);
+  console.log(`[score-band] 最適寄り5日平均 利益=¥${Math.round(avgProfit).toLocaleString()} → ランク${rank}（B帯=¥34k〜が及第点）`);
+  if (avgProfit < 34000)
+    throw new Error(`最適寄り平均利益がB帯(¥34k)未満: targetProfit/scoreRank の校正がズレている`);
+}
 
 // ---- 2c) セッション長: 1プレイの「決定停止回数」が ~5分相当の帯に収まるか ----
 // ターン制なので実時間 ≈ Σ(人間の判断時間)。停止(detectStop)回数がそのまま手数＝体感時間。
@@ -318,6 +381,56 @@ console.log(`[tables] maxTables=${CONFIG.maxTables}`);
   seatCustomerAction(state, c2.id, t.id, firstEmptyIdx(t));
   if (changeRateAction(state, t.id).ok) throw new Error("changeRate should fail with non-ANY customer");
   console.log("[rate] 点5希望が混在 → レート変更を正しく拒否");
+}
+
+// ---- 8) プロフィール: 通算加算・称号解放・自己ベスト・storage往復・旧キー移行 ----
+{
+  const mkKV = (seed?: Record<string, string>): KV => {
+    const mem = new Map<string, string>(Object.entries(seed ?? {}));
+    return { get: (k) => (mem.has(k) ? mem.get(k)! : null), set: (k, v) => void mem.set(k, v) };
+  };
+  const day = (over: Partial<DayResult> = {}): DayResult => ({
+    profit: 40000, rank: "B", served: 30, hanchan: 30, blueHanchan: 20, busts: 0, satisfied: 25, rageQuits: 3, reputation: 90, ...over,
+  });
+
+  // 加算 + 初営業/無事故 称号 + 自己ベスト
+  let p = defaultProfile();
+  let r = applyDayResult(p, day({ profit: 40000, busts: 0 }));
+  if (r.profile.gamesPlayed !== 1) throw new Error("gamesPlayed not incremented");
+  if (r.profile.bestProfit !== 40000) throw new Error("bestProfit not set");
+  if (!r.isNewBest) throw new Error("first day should be new best");
+  if (r.profile.cleanDays !== 1) throw new Error("cleanDays not counted");
+  const ids1 = r.newAchievements.map((a) => a.id);
+  if (!ids1.includes("first-day") || !ids1.includes("clean-day")) throw new Error(`first-day/clean-day not unlocked: ${ids1}`);
+
+  // 2日目: 低い利益はベスト更新しない・既存称号は再解放しない
+  r = applyDayResult(r.profile, day({ profit: 10000, busts: 2 }));
+  if (r.isNewBest) throw new Error("lower profit should not be new best");
+  if (r.profile.bestProfit !== 40000) throw new Error("bestProfit regressed");
+  if (r.newAchievements.some((a) => a.id === "first-day")) throw new Error("first-day re-unlocked");
+
+  // 点5の鬼: 点5比率7割以上＆A評価以上
+  r = applyDayResult(r.profile, day({ profit: 55000, rank: "A", hanchan: 30, blueHanchan: 24 }));
+  if (!r.newAchievements.some((a) => a.id === "blue-master")) throw new Error("blue-master not unlocked");
+  // S評価
+  r = applyDayResult(r.profile, day({ profit: 70000, rank: "S" }));
+  if (!r.newAchievements.some((a) => a.id === "rank-s")) throw new Error("rank-s not unlocked");
+  console.log(`[profile] 通算加算・称号解放OK（解放数=${r.profile.unlockedAchievements.length} 通算${r.profile.gamesPlayed}日 ベスト¥${r.profile.bestProfit?.toLocaleString()}）`);
+
+  // storage 往復
+  const kv = mkKV();
+  saveProfile(r.profile, kv);
+  const reloaded = loadProfile(kv);
+  if (reloaded.gamesPlayed !== r.profile.gamesPlayed || reloaded.bestProfit !== r.profile.bestProfit)
+    throw new Error("profile round-trip mismatch");
+  if (reloaded.unlockedAchievements.length !== r.profile.unlockedAchievements.length)
+    throw new Error("achievements round-trip mismatch");
+
+  // 旧キー移行（プロフィール未保存・旧 name/best のみ）
+  const legacy = loadProfile(mkKV({ "moshirasu.playerName": "旧店長", "moshirasu.bestProfit": "33000" }));
+  if (legacy.playerName !== "旧店長" || legacy.bestProfit !== 33000)
+    throw new Error(`legacy migration failed: ${legacy.playerName}/${legacy.bestProfit}`);
+  console.log("[profile] storage往復・旧キー移行 OK");
 }
 
 console.log("\n✅ smoke test passed");
