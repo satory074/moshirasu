@@ -1,5 +1,9 @@
 ---
 import "../styles/globals.css";
+
+// Cloudflare Web Analytics — Cookie 不要のプライバシー配慮解析。PUBLIC_CF_BEACON_TOKEN が
+// あればビーコンを出力、未設定なら非出力（graceful）。トークンは公開値なのでリポジトリ変数で駆動。
+const cfBeaconToken = import.meta.env.PUBLIC_CF_BEACON_TOKEN;
 ---
 
 <!doctype html>
@@ -12,6 +16,16 @@ import "../styles/globals.css";
       name="description"
       content="フリー雀荘の店長になって開店〜閉店まで卓を回し、売上を最大化するシミュレーションゲーム。"
     />
+    {
+      cfBeaconToken && (
+        <script
+          is:inline
+          defer
+          src="https://static.cloudflareinsights.com/beacon.min.js"
+          data-cf-beacon={JSON.stringify({ token: cfBeaconToken })}
+        />
+      )
+    }
   </head>
   <body>
     <header class="page-head">

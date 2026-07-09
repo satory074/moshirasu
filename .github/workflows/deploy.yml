@@ -30,6 +30,7 @@ jobs:
           # 共有ランキング（任意）。未設定ならローカルランキングにフォールバックする。
           PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL }}
           PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.PUBLIC_SUPABASE_ANON_KEY }}
+          PUBLIC_CF_BEACON_TOKEN: ${{ vars.PUBLIC_CF_BEACON_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
